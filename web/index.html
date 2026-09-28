@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en" data-ui="console">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LightingSim</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='9' fill='%23ff2d95'/%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%2300e5ff' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text">
+        <strong>LightingSim</strong>
+        <input id="show-name" class="show-name" aria-label="Show name" spellcheck="false">
+      </div>
+    </div>
+
+    <div class="clock" id="clock">
+      <button class="sync-pill" id="sync-pill" title="Sync source - change in Settings">
+        <span class="dot"></span><span id="sync-label">Internal</span>
+      </button>
+      <div class="bpm-wrap">
+        <input id="bpm" class="bpm" type="number" min="40" max="240" step="0.1" aria-label="BPM">
+        <span class="bpm-unit">BPM</span>
+      </div>
+      <button id="tap" class="btn tap" title="Tap tempo (T)">TAP</button>
+      <div class="beats" id="beats" aria-label="Beat position">
+        <span></span><span></span><span></span><span></span>
+      </div>
+      <div class="phrase" id="phrase" title="Bar in 8-bar phrase">1<small>/8</small></div>
+      <div class="btn-group" role="group" aria-label="Phase">
+        <button class="btn sm" id="nudge-back" title="Nudge back (←)">−</button>
+        <button class="btn sm" id="nudge-fwd" title="Nudge forward (→)">+</button>
+        <button class="btn sm" id="align-bar" title="This moment is beat 1 of the bar">1</button>
+        <button class="btn sm" id="align-phrase" title="This moment is the start of an 8-bar phrase">PHR</button>
+      </div>
+      <div class="btn-group seg" role="group" aria-label="Speed" id="speed">
+        <button class="btn sm" data-speed="0.5" title="Half-time ([)">½×</button>
+        <button class="btn sm" data-speed="1">1×</button>
+        <button class="btn sm" data-speed="2" title="Double-time (])">2×</button>
+      </div>
+    </div>
+
+    <div class="master">
+      <label class="live" title="Send to real lights. Off = simulate only.">
+        <input type="checkbox" id="live"><span class="live-track"><span class="live-knob"></span></span>
+        <span class="live-label">LIVE</span>
+      </label>
+      <label class="fader-h" title="Master">
+        <span>MASTER</span>
+        <input type="range" id="master" min="0" max="1" step="0.01" value="1">
+      </label>
+      <button class="btn danger" id="blackout" title="Blackout (B)">BLACKOUT</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <section id="stage-wrap">
+      <canvas id="stage" tabindex="0" aria-label="Stage simulator: drag lights to move them"></canvas>
+      <div class="stage-hud">
+        <span id="hud-scene" class="hud-scene"></span>
+        <span id="hud-next" class="hud-next"></span>
+      </div>
+      <div class="stage-tools">
+        <button class="btn sm ghost" id="add-light" title="Add a light">+ Light</button>
+        <button class="btn sm ghost" id="toggle-labels" title="Show/hide labels">Labels</button>
+        <span class="perf" id="perf"></span>
+      </div>
+    </section>
+    <aside id="inspector" aria-label="Inspector"></aside>
+  </main>
+
+  <section id="dock">
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="perform" class="active">Perform</button>
+      <button role="tab" data-tab="patterns">Patterns</button>
+      <button role="tab" data-tab="rig">Rig</button>
+      <button role="tab" data-tab="settings">Sync &amp; Settings</button>
+      <span class="grow"></span>
+      <span class="kbd-hint">T tap · 1-9 scenes · F flash · S strobe · B blackout</span>
+    </nav>
+    <div class="panel" id="tab-perform"></div>
+    <div class="panel" id="tab-patterns" hidden></div>
+    <div class="panel" id="tab-rig" hidden></div>
+    <div class="panel" id="tab-settings" hidden></div>
+  </section>
+</div>
+<div id="toasts" aria-live="polite"></div>
+<div id="offline" hidden><div><strong>Reconnecting to LightingSim…</strong><span>Is the app still running?</span></div></div>
+<script type="module" src="/static/js/main.js"></script>
+</body>
+</html>

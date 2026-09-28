@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+*.zip
+.dev-show.json
+.dev-show.*.json
+.DS_Store
+Thumbs.db
+.claude/
