@@ -49,6 +49,59 @@ def install_target() -> Path | None:
     return None
 
 
+def finish_update(target: str, pid: str, relaunch_args: list[str]) -> None:
+    """Runs from the freshly downloaded copy: wait for the old app, copy over it, relaunch."""
+    import shutil
+    import time
+    src = Path(sys.executable).resolve().parent
+    dst = Path(target)
+    log.info("Finishing update: %s -> %s (waiting for pid %s)", src, dst, pid)
+    _wait_for_exit(int(pid), 60)
+    for attempt in range(30):  # antivirus / slow exits can hold files for a moment
+        try:
+            shutil.copytree(src, dst, dirs_exist_ok=True)
+            break
+        except OSError as e:
+            if attempt == 29:
+                log.error("Update copy failed: %s", e)
+                subprocess.Popen([str(dst / "LightingSim.exe"), *relaunch_args], close_fds=True)  # reopen the old one
+                return
+            time.sleep(1)
+    log.info("Update installed; relaunching")
+    subprocess.Popen([str(dst / "LightingSim.exe"), *relaunch_args], close_fds=True, cwd=str(dst))
+
+
+def _wait_for_exit(pid: int, timeout: float):
+    if sys.platform == "win32":
+        import ctypes
+        k32 = ctypes.windll.kernel32
+        h = k32.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+        if h:
+            k32.WaitForSingleObject(h, int(timeout * 1000))
+            k32.CloseHandle(h)
+        return
+    import time
+    end = time.time() + timeout
+    while time.time() < end:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return
+        time.sleep(0.3)
+
+
+def cleanup_old_downloads():
+    """Remove update folders left in %TEMP% by earlier updates (best effort)."""
+    import shutil
+    import time
+    for d in Path(tempfile.gettempdir()).glob("lightsim-update-*"):
+        try:
+            if time.time() - d.stat().st_mtime > 600:
+                shutil.rmtree(d, ignore_errors=True)
+        except OSError:
+            pass
+
+
 class Updater:
     def __init__(self):
         target = install_target()
@@ -132,20 +185,15 @@ class Updater:
             src = new / "LightingSim" if (new / "LightingSim").is_dir() else new
             if not (src / "LightingSim.exe").exists():
                 raise RuntimeError("download didn't contain LightingSim.exe")
-            bat = work / "finish-update.bat"
-            args = subprocess.list2cmdline(sys.argv[1:])
-            lines = [
-                "@echo off",
-                ":wait",
-                # ping = a 1 s sleep that works without a console (timeout.exe doesn't)
-                f'tasklist /NH /FI "PID eq {pid}" 2>nul | findstr /B /C:"LightingSim" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)',
-                f'robocopy "{src}" "{target}" /E /IS /IT /R:10 /W:1 /NFL /NDL /NJH /NJS /NP >nul',
-                f'start "" "{target / "LightingSim.exe"}" {args}',
-                f'rmdir /s /q "{new}" 2>nul',
-            ]
-            bat.write_bytes(("\r\n".join(lines) + "\r\n").encode("utf-8"))
-            flags = 0x08000000 | 0x00000008  # CREATE_NO_WINDOW | DETACHED_PROCESS
-            subprocess.Popen(["cmd", "/c", str(bat)], creationflags=flags, close_fds=True)
+            # The *new* version installs itself: it waits for us to exit, copies its
+            # folder over ours and relaunches. No batch files or console tools,
+            # which proved unreliable when started without a console.
+            cmd = [str(src / "LightingSim.exe"), "--finish-update", str(target), str(pid), *sys.argv[1:]]
+            flags = 0x08000000 | 0x00000200  # CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP
+            try:
+                subprocess.Popen(cmd, creationflags=flags | 0x01000000, close_fds=True, cwd=str(src))  # + BREAKAWAY_FROM_JOB
+            except OSError:
+                subprocess.Popen(cmd, creationflags=flags, close_fds=True, cwd=str(src))
         else:
             new.mkdir()
             subprocess.run(["ditto", "-x", "-k", str(zpath), str(new)], check=True)  # keeps symlinks & perms

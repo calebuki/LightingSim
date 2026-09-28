@@ -487,6 +487,18 @@ def build_app(show: Show, port: int, lan: bool) -> web.Application:
 def main(argv=None):
     import argparse
 
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--finish-update"] and len(argv) >= 3:
+        # launched by the previous version: install this copy over it, then relaunch
+        from logging.handlers import RotatingFileHandler
+        from .show import data_dir
+        from .updater import finish_update
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s", datefmt="%H:%M:%S",
+                            handlers=[RotatingFileHandler(data_dir() / "lightsim.log", maxBytes=1_000_000,
+                                                          backupCount=1, encoding="utf-8")])
+        finish_update(argv[1], argv[2], argv[3:])
+        return
+
     ap = argparse.ArgumentParser(prog="lightsim", description="Budget DIY light show that syncs to rekordbox")
     ap.add_argument("--port", type=int, default=8750)
     ap.add_argument("--lan", action="store_true", help="allow phones/tablets on your Wi-Fi to open the controller")
@@ -505,6 +517,9 @@ def main(argv=None):
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
     show = Show(args.show)
     lan = args.lan or bool(show.data["settings"].get("lan_access"))
+    from .updater import cleanup_old_downloads
+    import threading
+    threading.Thread(target=cleanup_old_downloads, daemon=True).start()
 
     if not (args.browser or args.no_browser):
         from .desktop import run_desktop, show_error
