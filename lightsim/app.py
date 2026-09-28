@@ -56,6 +56,7 @@ class App:
         self.learn_target: str | None = None
         self.last_learn: dict | None = None
         self.held_controls: dict[str, float] = {}
+        self.on_quit = None  # set by the desktop window
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self, app: web.Application):
@@ -161,8 +162,14 @@ class App:
                             headers={"Content-Disposition": f'attachment; filename="{name}.lightshow.json"'})
 
     async def quit(self, request):
-        asyncio.get_running_loop().call_later(0.3, _graceful_exit)
+        if self.on_quit:  # desktop window: closing it shuts everything down cleanly
+            asyncio.get_running_loop().call_later(0.2, self.on_quit)
+        else:
+            asyncio.get_running_loop().call_later(0.3, _graceful_exit)
         return web.json_response({"ok": True})
+
+    async def ping(self, request):
+        return web.json_response({"app": "lightsim", "version": __version__})
 
     async def ws_handler(self, request):
         ws = web.WebSocketResponse(heartbeat=20, max_msg_size=32 * 1024 * 1024)
@@ -447,6 +454,7 @@ def build_app(show: Show, port: int, lan: bool) -> web.Application:
     app.router.add_get("/ws", core.ws_handler)
     app.router.add_get("/api/export", core.export_show)
     app.router.add_post("/api/quit", core.quit)
+    app.router.add_get("/api/ping", core.ping)
     app.router.add_static("/static/", web_root(), show_index=False)
     app["core"] = core
     return app
@@ -458,14 +466,27 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="lightsim", description="Budget DIY light show that syncs to rekordbox")
     ap.add_argument("--port", type=int, default=8750)
     ap.add_argument("--lan", action="store_true", help="allow phones/tablets on your Wi-Fi to open the controller")
-    ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--browser", action="store_true", help="use your web browser instead of the app window")
+    ap.add_argument("--no-browser", action="store_true", help="server only (for development / headless boxes)")
     ap.add_argument("--show", type=Path, help="show file to use (default: per-user app data)")
     args = ap.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s", datefmt="%H:%M:%S")
+    from logging.handlers import RotatingFileHandler
+    from .show import data_dir
+    handlers = [RotatingFileHandler(data_dir() / "lightsim.log", maxBytes=1_000_000, backupCount=1, encoding="utf-8")]
+    if sys.stderr:
+        handlers.append(logging.StreamHandler())
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s: %(message)s", datefmt="%H:%M:%S",
+                        handlers=handlers)
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
     show = Show(args.show)
     lan = args.lan or bool(show.data["settings"].get("lan_access"))
+
+    if not (args.browser or args.no_browser):
+        from .desktop import run_desktop
+        if run_desktop(show, args.port, lan, data_dir()):
+            return
+        log.warning("Falling back to browser mode")
     host = "0.0.0.0" if lan else "127.0.0.1"
     url = f"http://127.0.0.1:{args.port}"
     print(f"\n  LightingSim {__version__}\n  Open {url}")

@@ -128,7 +128,12 @@ function showCard() {
     h('h4', 'Show file'),
     h('p', 'Everything autosaves on this computer. Export a show file to move your rig and presets to another laptop, or keep it in your GitHub repo.'),
     h('div.row',
-      h('a.btn.sm', { href: '/api/export', download: '' }, 'Export show'),
+      h('a.btn.sm', { href: '/api/export', download: '', onclick: async (e) => {
+        if (!window.pywebview?.api?.export_show) return; // browser: normal download
+        e.preventDefault();
+        const name = await window.pywebview.api.export_show();
+        if (name) toast(`Saved ${name}`);
+      } }, 'Export show'),
       h('label.btn.sm', { style: { cursor: 'pointer' } }, 'Import show…', h('input', { type: 'file', accept: '.json,application/json', hidden: true, onchange: importShow })),
       h('button.btn.sm', { onclick: () => send('restore_presets') }, 'Restore built-in presets'),
       h('button.btn.sm', { onclick: (e) => {
@@ -159,5 +164,5 @@ function remoteCard(st) {
       ? h('p', 'Open ', ...S.lanUrls.map((u) => h('b.mono', { style: { color: 'var(--text)' } }, u + ' ')), 'on your phone to fire scenes from the booth.')
       : h('p', st.lan_access ? 'Restart LightingSim to turn this on.' : 'Off: only this computer can control the lights.'),
     h('div.row',
-      h('button.btn.sm', { onclick: async () => { await fetch('/api/quit', { method: 'POST' }).catch(() => {}); toast('LightingSim stopped. You can close this tab.'); } }, 'Quit LightingSim')));
+      h('button.btn.sm', { onclick: async () => { await fetch('/api/quit', { method: 'POST' }).catch(() => {}); if (!window.pywebview) toast('LightingSim stopped. You can close this tab.'); } }, 'Quit LightingSim')));
 }

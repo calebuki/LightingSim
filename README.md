@@ -15,15 +15,17 @@ A budget light show controller for DJs. It follows rekordbox's tempo and bar pos
 
 ### Option A: download the app
 Go to **Releases** on this repo and download:
-- **Windows:** `LightingSim-windows.zip`. Unzip it and run `LightingSim.exe`. A small window shows the address, and your browser opens the controller. Close that window to quit.
+- **Windows:** `LightingSim-windows.zip`. Unzip it anywhere (for example into Documents) and double-click `LightingSim.exe`. Right-click it → **Pin to Start** or **Send to → Desktop** for a shortcut. If Windows SmartScreen warns about an unknown app, click **More info → Run anyway**.
 - **Mac (Apple Silicon):** `LightingSim-macos-apple-silicon.zip`. Unzip it and move `LightingSim.app` to Applications. The first time, **right-click → Open** (the app isn't signed by Apple). Allow "local network" access when macOS asks; Link and Wi-Fi lights need it.
+
+LightingSim opens in its own window. There's no browser tab or terminal to keep open, and closing the window quits the app (it blacks out any live lights first). The window uses Microsoft Edge WebView2, which is built into Windows 10 and 11. If it's missing, the app opens in your browser instead.
 
 ### Option B: run from source (any Mac, including Intel, and Windows)
 1. Install Python 3.10 or newer from [python.org](https://www.python.org/downloads/).
 2. Download this repo (green **Code** button → Download ZIP, or `git clone`).
 3. Double-click **`run-windows.bat`** (Windows) or **`run-mac.command`** (Mac). The first run installs everything into a local `.venv` folder.
 
-The controller opens at `http://127.0.0.1:8750`.
+The app window opens and the setup window closes by itself. To use your web browser instead, run with `--browser`; the controller is then at `http://127.0.0.1:8750`.
 
 ---
 
@@ -141,7 +143,7 @@ python -m venv .venv
 .venv/bin/python -m lightsim --show dev-show.json
 ```
 
-Options: `--port 8750`, `--lan` (allow phones), `--no-browser`, `--show PATH`.
+Options: `--port 8750`, `--lan` (allow phones), `--browser` (use a browser tab instead of the app window), `--no-browser` (server only), `--show PATH`. Logs go to `lightsim.log` next to the show file.
 
 | Path | What's there |
 |---|---|
