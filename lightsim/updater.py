@@ -133,14 +133,17 @@ class Updater:
             if not (src / "LightingSim.exe").exists():
                 raise RuntimeError("download didn't contain LightingSim.exe")
             bat = work / "finish-update.bat"
-            bat.write_text(
-                "@echo off\r\n"
-                ":wait\r\n"
-                f'tasklist /FI "PID eq {pid}" 2>nul | find "{pid}" >nul && (timeout /t 1 /nobreak >nul & goto wait)\r\n'
-                f'robocopy "{src}" "{target}" /E /IS /IT /R:5 /W:1 /NFL /NDL /NJH /NJS /NP >nul\r\n'
-                f'start "" "{target / "LightingSim.exe"}"\r\n'
-                f'rmdir /s /q "{new}" 2>nul\r\n',
-                "utf-8")
+            args = subprocess.list2cmdline(sys.argv[1:])
+            lines = [
+                "@echo off",
+                ":wait",
+                # ping = a 1 s sleep that works without a console (timeout.exe doesn't)
+                f'tasklist /NH /FI "PID eq {pid}" 2>nul | findstr /B /C:"LightingSim" >nul && (ping -n 2 127.0.0.1 >nul & goto wait)',
+                f'robocopy "{src}" "{target}" /E /IS /IT /R:10 /W:1 /NFL /NDL /NJH /NJS /NP >nul',
+                f'start "" "{target / "LightingSim.exe"}" {args}',
+                f'rmdir /s /q "{new}" 2>nul',
+            ]
+            bat.write_bytes(("\r\n".join(lines) + "\r\n").encode("utf-8"))
             flags = 0x08000000 | 0x00000008  # CREATE_NO_WINDOW | DETACHED_PROCESS
             subprocess.Popen(["cmd", "/c", str(bat)], creationflags=flags, close_fds=True)
         else:
@@ -156,6 +159,6 @@ class Updater:
                 f'rm -rf "{target}.old"\n'
                 f'if mv "{target}" "{target}.old" && ditto "{app}" "{target}"; then rm -rf "{target}.old";'
                 f' else rm -rf "{target}"; mv "{target}.old" "{target}"; fi\n'
-                f'open "{target}"\n')
+                f'open "{target}"' + (" --args " + " ".join(f"'{a}'" for a in sys.argv[1:]) if sys.argv[1:] else "") + "\n")
             sh.chmod(0o755)
             subprocess.Popen(["/bin/bash", str(sh)], start_new_session=True, close_fds=True)

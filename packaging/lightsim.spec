@@ -42,7 +42,7 @@ if sys.platform == "darwin":
         bundle_identifier="io.github.calebuki.lightingsim",
         info_plist={
             "CFBundleName": "LightingSim",
-            "CFBundleShortVersionString": "1.2.0",
+            "CFBundleShortVersionString": "1.2.1",
             "NSHighResolutionCapable": True,
             "NSLocalNetworkUsageDescription": "LightingSim talks to WLED, Govee and WiZ lights and Ableton Link (rekordbox) on your network.",
             "NSBonjourServices": ["_ableton-link._udp"],
