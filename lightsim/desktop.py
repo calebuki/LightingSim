@@ -92,8 +92,49 @@ class Api:
         return Path(path).name
 
 
+def unblock_bundle():
+    """Remove Windows' "downloaded from the internet" mark from our own files.
+
+    Unzipping a downloaded release tags every file with a Zone.Identifier
+    stream, and .NET refuses to load marked DLLs - which is what powers the
+    app window (pythonnet -> WinForms/WebView2). Clearing the mark on our own
+    bundled binaries is what Windows' "Unblock" checkbox does.
+    """
+    import os
+    import sys
+    if sys.platform != "win32" or not getattr(sys, "frozen", False):
+        return
+    base = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    cleared = 0
+    for dirpath, _dirs, files in os.walk(base):
+        for name in files:
+            if name.lower().endswith((".dll", ".pyd", ".exe")):
+                try:
+                    os.remove(os.path.join(dirpath, name) + ":Zone.Identifier")
+                    cleared += 1
+                except OSError:
+                    pass
+    if cleared:
+        log.info("Cleared the download mark from %d bundled files", cleared)
+
+
+def show_error(title: str, text: str):
+    """Native message box so problems are never silent."""
+    import sys
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, text, title, 0x10)
+        elif sys.platform == "darwin":
+            import subprocess
+            subprocess.run(["osascript", "-e", f'display alert "{title}" message "{text}"'], check=False)
+    except Exception:
+        pass
+
+
 def run_desktop(show, port: int, lan: bool, data_dir: Path) -> bool:
     """Open the app window. Returns False if no native webview is available."""
+    unblock_bundle()
     try:
         import webview
     except Exception as e:

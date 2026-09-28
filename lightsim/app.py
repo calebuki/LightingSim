@@ -483,10 +483,13 @@ def main(argv=None):
     lan = args.lan or bool(show.data["settings"].get("lan_access"))
 
     if not (args.browser or args.no_browser):
-        from .desktop import run_desktop
+        from .desktop import run_desktop, show_error
         if run_desktop(show, args.port, lan, data_dir()):
             return
         log.warning("Falling back to browser mode")
+        show_error("LightingSim", "LightingSim couldn't open its app window, so it will open in your web browser "
+                   "this time.\n\nIf this keeps happening on Windows, install the free Microsoft Edge WebView2 "
+                   f"Runtime.\n\nDetails are in:\n{data_dir() / 'lightsim.log'}")
     host = "0.0.0.0" if lan else "127.0.0.1"
     url = f"http://127.0.0.1:{args.port}"
     print(f"\n  LightingSim {__version__}\n  Open {url}")
