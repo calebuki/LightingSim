@@ -43,7 +43,23 @@ function render() {
   if (!S.show || !root) return;
   const st = S.show.settings;
   root.replaceChildren(h('div.settings',
-    syncCard(st), midiCard(st), dmxCard(st), safetyCard(st), showCard(), remoteCard(st)));
+    syncCard(st), midiCard(st), dmxCard(st), safetyCard(st), showCard(), updatesCard(st), remoteCard(st)));
+}
+
+function updatesCard(st) {
+  const u = S.status?.update || { current: S.version, status: 'idle' };
+  const line = u.status === 'checking' ? 'Checking…'
+    : u.status === 'error' ? u.error
+    : u.available ? `LightingSim ${u.latest} is available.`
+    : u.latest ? `You’re up to date (${u.current}).` : `Version ${u.current || S.version}.`;
+  return h('div.card',
+    h('h4', 'Updates'),
+    h('p#update-line', line),
+    h('div.row',
+      h('button.btn.sm', { onclick: async () => { send('update_check'); setTimeout(render, 2500); } }, 'Check now'),
+      u.available ? h('button.btn.sm.primary', { onclick: () => import('./update.js').then((m) => m.confirmUpdate(u)) }, `Update to ${u.latest}`) : null),
+    h('label.check', h('input', { type: 'checkbox', checked: st.auto_update_check !== false,
+      onchange: (e) => patch({ auto_update_check: e.target.checked }) }), 'Check for updates when LightingSim opens'));
 }
 
 function syncCard(st) {

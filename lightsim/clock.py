@@ -170,7 +170,8 @@ class BeatClock:
         self.offset = 0.0  # user bar/phrase realignment in beats
         self.speed = 1.0   # half-time / double-time applied to pattern playback
         self.taps: deque[float] = deque(maxlen=8)
-        self._speed_anchor = (0.0, 0.0)  # (raw beat, scaled beat) so speed changes don't jump
+        self._speed_anchor = (0.0, 0.0)  # (raw beat, pattern beat) so speed changes don't jump
+        self._tap_start = 0.0
 
     # -- source selection ---------------------------------------------------------
     def use(self, name: str):
@@ -219,32 +220,48 @@ class BeatClock:
         self.source.set_bpm(bpm)
 
     def tap(self):
+        """Tap along from the downbeat: sets tempo, and the first tap becomes beat 1."""
         t = now()
         if self.taps and t - self.taps[-1] > 2.0:
             self.taps.clear()
+            self._tap_start = t
+        if not self.taps:
+            self._tap_start = t
         self.taps.append(t)
         if len(self.taps) >= 3:
             iv = [b - a for a, b in zip(self.taps, list(self.taps)[1:])]
             iv.sort()
             bpm = 60.0 / iv[len(iv) // 2]
             self.set_bpm(round(bpm * 10) / 10)
-            if self.source is self.internal:  # land the tap exactly on a beat
-                b = self.internal.beat(t)
-                self.internal.anchor_beat -= b - round(b)
+            if self.source is self.internal:
+                # put the beat grid exactly on the taps (average error of all taps)
+                errs = [((self.internal.beat(x) + 0.5) % 1.0) - 0.5 for x in self.taps]
+                self.internal.anchor_beat -= sum(errs) / len(errs)
+            self.align(4, at=self._tap_start, keep_phase=True)
 
     def nudge(self, beats: float):
         self.offset += beats
 
-    def align(self, period: int):
-        """'This moment is the 1' - realign bar (4) or phrase (32) to now."""
-        b = self.raw_beat()
+    def align(self, period: int, at: float | None = None, keep_phase: bool | None = None):
+        """'This moment is the 1': make the pattern's bar (4) or phrase (32) start now.
+
+        Works on the *pattern* beat (after half/double-time), which is what the
+        lights play. External clocks (Link/MIDI) keep their exact sub-beat phase,
+        so a slightly early/late press only picks which beat is the 1. The manual
+        clock also takes the press's phase when it's clearly off the grid.
+        """
+        t = now() if at is None else at
+        b = self.beat(t)
         d = b % period
         if d > period / 2:
             d -= period
-        if self.source is self.internal:
-            self.offset -= d  # full phase, tap-accurate
-        else:
-            self.offset -= round(d)  # keep the external sub-beat phase
+        q = min(1.0, self.speed)  # pattern-beat step that stays on the source's beat grid
+        snapped = round(d / q) * q
+        if keep_phase is None:
+            keep_phase = self.source is not self.internal or abs(d - snapped) < 0.2
+        shift = snapped if keep_phase else d
+        r0, s0 = self._speed_anchor
+        self._speed_anchor = (r0, s0 - shift)
 
     def status(self) -> dict:
         s = self.source.status()

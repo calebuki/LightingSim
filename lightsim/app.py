@@ -23,6 +23,7 @@ from .midi import MidiManager
 from .outputs import OutputManager, list_serial_ports
 from .presets import PALETTES
 from .show import Show
+from .updater import Updater
 
 log = logging.getLogger("lightsim")
 
@@ -57,6 +58,7 @@ class App:
         self.last_learn: dict | None = None
         self.held_controls: dict[str, float] = {}
         self.on_quit = None  # set by the desktop window
+        self.updater = Updater()
 
     # ------------------------------------------------------------------ lifecycle
     async def start(self, app: web.Application):
@@ -74,6 +76,8 @@ class App:
         self.thread = EngineThread(self.engine, self._on_frame_threadsafe)
         self.thread.start()
         self._status_task = asyncio.create_task(self._status_loop())
+        if st.get("auto_update_check", True):
+            asyncio.create_task(self._check_updates_later())
 
     async def stop(self, app: web.Application):
         self.thread.running = False
@@ -114,7 +118,8 @@ class App:
                 if self.clients:
                     msg = {"type": "status", "engine": self.engine.status(), "clock": self.clock.status(),
                            "outputs": self.outputs.status(), "learn": self.learn_target, "learned": self.last_learn,
-                           "autopilot": self.show.data["settings"]["autopilot"].get("enabled", False)}
+                           "autopilot": self.show.data["settings"]["autopilot"].get("enabled", False),
+                           "update": self.updater.state}
                     await self.broadcast(msg)
                 self.show.save_if_dirty()
             except asyncio.CancelledError:
@@ -161,12 +166,26 @@ class App:
         return web.Response(text=body, content_type="application/json",
                             headers={"Content-Disposition": f'attachment; filename="{name}.lightshow.json"'})
 
-    async def quit(self, request):
+    def request_quit(self, delay: float = 0.3):
         if self.on_quit:  # desktop window: closing it shuts everything down cleanly
-            asyncio.get_running_loop().call_later(0.2, self.on_quit)
+            asyncio.get_running_loop().call_later(delay, self.on_quit)
         else:
-            asyncio.get_running_loop().call_later(0.3, _graceful_exit)
+            asyncio.get_running_loop().call_later(delay, _graceful_exit)
+
+    async def quit(self, request):
+        self.request_quit()
         return web.json_response({"ok": True})
+
+    async def _check_updates_later(self):
+        await asyncio.sleep(4)
+        await self.updater.check()
+        if self.updater.state["available"]:
+            log.info("Update available: %s", self.updater.state["latest"])
+
+    async def _install_update(self):
+        if await self.updater.install():
+            # the helper swaps files once we've exited, then relaunches us
+            self.request_quit(0.5)
 
     async def ping(self, request):
         return web.json_response({"app": "lightsim", "version": __version__})
@@ -349,6 +368,11 @@ class App:
             d["settings"]["midi_map"].pop(m["key"], None)
             show.mark_dirty()
             await self.broadcast({"type": "settings", "settings": d["settings"]})
+        elif op == "update_check":
+            await self.updater.check()
+        elif op == "update_install":
+            if self.updater.state["status"] not in ("downloading", "installing"):
+                asyncio.create_task(self._install_update())
         elif op == "scan":
             kind = m.get("kind")
             if kind == "govee":

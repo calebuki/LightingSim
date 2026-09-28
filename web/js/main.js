@@ -5,6 +5,7 @@ import { initPerform } from './perform.js';
 import { initPatterns } from './patterns.js';
 import { initRig, renderInspector } from './rig.js';
 import { initSettings } from './settings.js';
+import { initUpdate } from './update.js';
 
 import { S, send, beatNow, scene, fixture, palette, pending, setSocket } from './state.js';
 
@@ -102,8 +103,10 @@ function initTopbar() {
   $('#tap').addEventListener('pointerdown', tap);
   $('#nudge-back').onclick = () => send('nudge', { beats: -0.03 });
   $('#nudge-fwd').onclick = () => send('nudge', { beats: 0.03 });
-  $('#align-bar').onclick = () => { send('align', { period: 4 }); toast('Bar realigned: this is the 1'); };
-  $('#align-phrase').onclick = () => { send('align', { period: 32 }); toast('Phrase realigned: 8-bar loops start now'); };
+  // fire on press, not release: a click only lands when the mouse comes back up,
+  // which is ~100 ms after you hit the beat
+  $('#align-bar').addEventListener('pointerdown', (e) => { e.preventDefault(); align(4); });
+  $('#align-phrase').addEventListener('pointerdown', (e) => { e.preventDefault(); align(32); });
   $$('#speed .btn').forEach((b) => (b.onclick = () => send('speed', { value: parseFloat(b.dataset.speed) })));
   $('#master').addEventListener('input', (e) => send('master', { value: parseFloat(e.target.value) }));
   $('#blackout').onclick = () => send('blackout', { on: !S.status?.engine.blackout });
@@ -146,6 +149,14 @@ function initTopbar() {
     requestAnimationFrame(loop);
   })();
 }
+function align(period) {
+  send('align', { period });
+  const b = $(period === 4 ? '#align-bar' : '#align-phrase');
+  b.classList.add('on'); setTimeout(() => b.classList.remove('on'), 160);
+  const beats = $('#beats');
+  beats.classList.remove('reset'); void beats.offsetWidth; beats.classList.add('reset');
+  toast(period === 4 ? 'Beat 1 set' : 'Phrase start set: 8-bar loops begin now');
+}
 function tap() {
   send('tap');
   const t = $('#tap'); t.classList.add('hit'); setTimeout(() => t.classList.remove('hit'), 90);
@@ -186,6 +197,7 @@ function initKeys() {
     if (e.repeat) return;
     const k = e.key.toLowerCase();
     if (k === 't') tap();
+    else if (k === ' ') align(e.shiftKey ? 32 : 4);
     else if (k === 'b') send('blackout', { on: !S.status?.engine.blackout });
     else if (k === 'f') { held.add('f'); send('flash', { value: 1 }); }
     else if (k === 's') { held.add('s'); send('strobe', { on: true }); }
@@ -221,5 +233,6 @@ initPerform();
 initPatterns();
 initRig();
 initSettings();
+initUpdate();
 on('init', renderInspector);
 connect();

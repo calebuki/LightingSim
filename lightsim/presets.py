@@ -174,6 +174,7 @@ def default_settings() -> dict:
         "output_enabled": False,
         "dmx_interfaces": [{"id": "dmx1", "type": "none", "port": "", "host": "", "universe": 0}],
         "lan_access": False,
+        "auto_update_check": True,
         "theme": "neon",
         "stage": {"aspect": 1.7778, "background": "", "bg_dim": 0.55, "haze": 0.5, "show_labels": True},
     }

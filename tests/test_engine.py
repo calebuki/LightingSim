@@ -146,6 +146,77 @@ def test_tap_tempo():
     assert abs(asyncio.run(run()) - 120.0) < 0.2
 
 
+def _clock_at(bpm=120.0):
+    """A BeatClock whose 'now' we control."""
+    import lightsim.clock as cm
+
+    class T:
+        t = 1000.0
+    cm.now = lambda: T.t
+    clk = BeatClock(None, bpm)
+    clk.internal.anchor_t = T.t
+    return clk, T
+
+
+def _restore_now():
+    import lightsim.clock as cm
+    cm.now = time.perf_counter
+
+
+def test_align_bar_makes_now_beat_one():
+    try:
+        clk, T = _clock_at(120)
+        T.t += 0.5 * 6.03  # ~beat 6.03 (bar 2, beat 3), pressed a hair after the beat
+        clk.align(4)
+        b = clk.beat()
+        assert round(b) % 4 == 0 and abs(b - round(b) - 0.03) < 1e-6  # beat grid untouched
+        T.t += 0.5 * 1.4  # press clearly between beats on the manual clock: take its phase
+        clk.align(4)
+        assert abs(((clk.beat() + 2) % 4) - 2) < 1e-9
+    finally:
+        _restore_now()
+
+
+def test_align_keeps_external_phase_when_press_is_late():
+    try:
+        clk, T = _clock_at(120)
+        clk.source = clk.midi  # stand-in external clock: phase must be preserved
+        clk.midi.beat = lambda t: (t - 1000.0) * 2.0
+        T.t = 1000.0 + 0.5 * 8.12  # user pressed 0.12 beat late on the 1 of bar 3
+        clk.align(4)
+        b = clk.beat()
+        assert abs(b - round(b) - 0.12) < 1e-6 and round(b) % 4 == 0
+    finally:
+        _restore_now()
+
+
+def test_align_works_after_half_time():
+    try:
+        clk, T = _clock_at(120)
+        T.t += 0.5 * 3.3
+        clk.set_speed(0.5)
+        T.t += 0.5 * 5.0
+        clk.align(4)
+        assert abs(((clk.beat() + 2) % 4) - 2) < 1e-6
+    finally:
+        _restore_now()
+
+
+def test_tap_first_tap_is_beat_one():
+    try:
+        clk, T = _clock_at(100)
+        T.t += 0.37  # start tapping at an arbitrary moment
+        start = T.t
+        for i in range(4):
+            T.t = start + i * 0.5
+            clk.tap()
+        assert abs(clk.bpm - 120.0) < 0.2
+        b0 = clk.beat(start)
+        assert abs(((b0 + 2) % 4) - 2) < 1e-6
+    finally:
+        _restore_now()
+
+
 def test_show_roundtrip(tmp_path):
     s = Show(tmp_path / "x.json")
     s.save()

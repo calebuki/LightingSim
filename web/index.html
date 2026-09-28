@@ -36,8 +36,8 @@
       <div class="btn-group" role="group" aria-label="Phase">
         <button class="btn sm" id="nudge-back" title="Nudge back (←)">−</button>
         <button class="btn sm" id="nudge-fwd" title="Nudge forward (→)">+</button>
-        <button class="btn sm" id="align-bar" title="This moment is beat 1 of the bar">1</button>
-        <button class="btn sm" id="align-phrase" title="This moment is the start of an 8-bar phrase">PHR</button>
+        <button class="btn sm" id="align-bar" title="Press on the downbeat: this is beat 1 (Space)">1</button>
+        <button class="btn sm" id="align-phrase" title="Press on the first beat of a drop: 8-bar phrase starts now (Shift+Space)">PHR</button>
       </div>
       <div class="btn-group seg" role="group" aria-label="Speed" id="speed">
         <button class="btn sm" data-speed="0.5" title="Half-time ([)">½×</button>
@@ -47,6 +47,7 @@
     </div>
 
     <div class="master">
+      <button class="btn sm update-btn" id="update-btn" hidden></button>
       <label class="live" title="Send to real lights. Off = simulate only.">
         <input type="checkbox" id="live"><span class="live-track"><span class="live-knob"></span></span>
         <span class="live-label">LIVE</span>
@@ -82,7 +83,7 @@
       <button role="tab" data-tab="rig">Rig</button>
       <button role="tab" data-tab="settings">Sync &amp; Settings</button>
       <span class="grow"></span>
-      <span class="kbd-hint">T tap · 1-9 scenes · F flash · S strobe · B blackout</span>
+      <span class="kbd-hint">Space beat 1 · T tap · 1-9 scenes · F flash · S strobe · B blackout</span>
     </nav>
     <div class="panel" id="tab-perform"></div>
     <div class="panel" id="tab-patterns" hidden></div>
