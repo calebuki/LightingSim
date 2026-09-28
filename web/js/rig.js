@@ -15,7 +15,7 @@ let root;
 export function initRig() {
   root = $('#tab-rig');
   on('init', renderRig);
-  on('fixtures', () => { renderRig(); renderInspector(); });
+  on('fixtures', renderRig);
   on('select', () => { renderInspector(); highlightRow(); });
   on('settings', renderRig);
   on('add-light', openAddModal);
@@ -65,60 +65,37 @@ function update(f, rerender = false) {
 }
 
 // ------------------------------------------------------------------ rig tab
+function statusClass(f) {
+  const p = f.patch || {};
+  if (!p.protocol || p.protocol === 'none') return '';
+  if (p.protocol === 'dmx') {
+    const iface = S.show.settings.dmx_interfaces.find((d) => d.id === p.interface);
+    return iface && iface.type !== 'none' ? 'ok' : 'warn';
+  }
+  return p.host ? 'ok' : 'warn';
+}
+
 function renderRig() {
   if (!root || !S.show) return;
-  const st = S.show.settings.stage;
   const fxs = S.show.fixtures;
-  const counts = {};
-  fxs.forEach((f) => (counts[f.kind] = (counts[f.kind] || 0) + 1));
-
   root.replaceChildren(h('div.rig',
-    h('div', { style: { display: 'grid', gap: '10px', alignContent: 'start' } },
-      h('div.row',
+    h('div.rig-left',
+      h('div.row', { style: { gap: '4px' } },
         h('button.btn.sm.primary', { onclick: openAddModal }, '+ Add light'),
-        h('button.btn.sm', { onclick: (e) => scan('govee', e.target) }, 'Find Govee lights'),
-        h('button.btn.sm', { onclick: (e) => scan('wiz', e.target) }, 'Find WiZ bulbs'),
-        h('span.grow'),
-        h('span.muted', { style: { fontSize: '12px' } }, `${fxs.length} lights · ${fxs.reduce((a, f) => a + f.pixels, 0)} pixels`)),
-      h('div#scan-results.row'),
-      h('div', { style: { overflowX: 'auto' } },
-        h('table.list',
-          h('thead', h('tr', ['Name', 'Type', 'Group', 'Output', 'Limits', ''].map((c) => h('th', c)))),
-          h('tbody', fxs.map((f) => h('tr', { 'data-id': f.id, class: f.id === S.sel ? 'sel' : '', onclick: () => { S.sel = f.id; emit('select'); } },
-            h('td', f.name),
-            h('td.muted', S.profiles[f.kind]?.label || f.kind),
-            h('td', h('span.tag', f.group)),
-            h('td', outputTag(f), ' ', h('span.muted.mono', { style: { fontSize: '11px' } }, outputLabel(f))),
-            h('td.mono.muted', { style: { fontSize: '11px' } }, `${f.caps.update_hz}Hz · ${f.caps.latency_ms}ms`),
-            h('td', h('button.btn.xs', { onclick: (e) => { e.stopPropagation(); send('identify', { id: f.id }); } }, 'Identify')))))))),
-
-    h('div', { style: { display: 'grid', gap: '12px', alignContent: 'start' } },
-      h('div.card',
-        h('h4', 'Stage'),
-        h('div.row',
-          h('label.btn.sm', { style: { cursor: 'pointer' } }, 'Upload photo of your space',
-            h('input', { type: 'file', accept: 'image/*', hidden: true, onchange: (e) => loadBackground(e.target.files[0]) })),
-          st.background ? h('button.btn.sm', { onclick: () => send('settings', { patch: { stage: { ...st, background: '' } } }) }, 'Remove photo') : null),
-        h('div.row',
-          field('Shape', select([[1.7778, '16:9 wide'], [1.3333, '4:3'], [2.3333, '21:9 ultra-wide'], [1, 'Square']], st.aspect,
-            (v) => send('settings', { patch: { stage: { ...st, aspect: parseFloat(v) } } }), { id: 'stage-aspect' }), 'grow'),
-          field('Photo dim', h('input#stage-dim', { type: 'range', min: 0, max: 0.95, step: 0.05, value: st.bg_dim ?? 0.55,
-            onchange: (e) => send('settings', { patch: { stage: { ...st, bg_dim: parseFloat(e.target.value) } } }) })),
-          field('Haze', h('input#stage-haze', { type: 'range', min: 0, max: 1, step: 0.05, value: st.haze ?? 0.5,
-            onchange: (e) => send('settings', { patch: { stage: { ...st, haze: parseFloat(e.target.value) } } }) }))),
-        h('p.muted', { style: { margin: 0, fontSize: '12px' } }, 'Drag lights on the stage to place them. Drag the square handles to stretch strips and strings, the round handle to aim floods. Hold Shift to snap.')),
-      h('div.card',
-        h('h4', 'Your rig'),
-        Object.keys(counts).length
-          ? h('div', { style: { display: 'grid', gap: '6px' } }, Object.entries(counts).map(([k, n]) =>
-            h('div.row', { style: { justifyContent: 'space-between', fontSize: '12.5px' } },
-              h('span', `${n} × ${S.profiles[k]?.label || k}`), h('span.mono', { style: { color: 'var(--ok)', fontSize: '11px' } }, S.profiles[k]?.cost || ''))))
-          : h('p.muted', 'No lights yet.'),
-        h('p.muted', { style: { margin: 0, fontSize: '12px' } }, 'Cheapest fast path: one $5 ESP32 running WLED drives strips and pixel bulbs. A $15–20 FTDI USB-DMX cable runs budget DMX floods.')),
-    )));
+        h('button.btn.sm', { onclick: (e) => scan('govee', e.target) }, 'Find Govee'),
+        h('button.btn.sm', { onclick: (e) => scan('wiz', e.target) }, 'Find WiZ')),
+      h('div#scan-results.row', { style: { gap: '4px' } }),
+      h('div.fx-list', fxs.map((f) => h('button.fx-item', {
+        class: f.id === S.sel ? 'sel' : '', 'data-id': f.id, title: `${f.name} · ${outputLabel(f)}`,
+        onclick: () => { S.sel = f.id === S.sel ? null : f.id; emit('select'); },
+      }, h('i.st', { class: statusClass(f) }), h('span', f.name)))),
+      h('span.muted', { style: { fontSize: '11.5px' } },
+        `${fxs.length} lights · ${fxs.reduce((a, f) => a + f.pixels, 0)} pixels · green = patched, amber = needs setup`)),
+    h('div#inspector')));
+  renderInspector();
 }
 function highlightRow() {
-  root?.querySelectorAll('tr[data-id]').forEach((r) => r.classList.toggle('sel', r.dataset.id === S.sel));
+  root?.querySelectorAll('.fx-item').forEach((r) => r.classList.toggle('sel', r.dataset.id === S.sel));
 }
 
 async function scan(kind, btn) {
@@ -128,16 +105,16 @@ async function scan(kind, btn) {
   btn.disabled = false; btn.textContent = label;
   const box = $('#scan-results');
   if (!box) return res;
-  if (!res.length) { box.replaceChildren(h('span.muted', { style: { fontSize: '12px' } }, kind === 'govee' ? 'No Govee devices answered. Turn on “LAN Control” for each light in the Govee app, and keep this computer on the same Wi-Fi.' : 'No WiZ bulbs answered. Check they’re on the same Wi-Fi and “Allow local communication” is on in the WiZ app.')); return res; }
+  if (!res.length) { box.replaceChildren(h('span.insp-note', kind === 'govee' ? 'No Govee lights answered. Turn on “LAN Control” for each light in the Govee app, on the same Wi-Fi.' : 'No WiZ bulbs answered. Check they’re on the same Wi-Fi and “Allow local communication” is on in the WiZ app.')); return res; }
   if (res[0].error) { box.replaceChildren(h('span.warn', res[0].error)); return res; }
   const taken = new Set(S.show.fixtures.map((f) => f.patch?.host).filter(Boolean));
-  box.replaceChildren(h('span.muted', { style: { fontSize: '12px' } }, 'Found:'), ...res.map((d) =>
+  box.replaceChildren(...res.map((d) =>
     h('button.btn.xs', {
       disabled: taken.has(d.host),
       onclick: () => send('fixture_add', {
         kind: d.protocol === 'govee' ? 'govee_string' : 'bulb_wiz', x: 0.2 + Math.random() * 0.6, y: 0.3 + Math.random() * 0.3,
         name: d.name, patch: { protocol: d.protocol, host: d.host } }),
-    }, `${d.name} · ${d.host}${taken.has(d.host) ? ' (added)' : ''}`)));
+    }, `+ ${d.name} · ${d.host}${taken.has(d.host) ? ' (added)' : ''}`)));
   return res;
 }
 
@@ -170,19 +147,12 @@ function openAddModal() {
   document.body.append(bg);
 }
 
-// ------------------------------------------------------------------ inspector
+// ------------------------------------------------------------------ inspector (three columns, no scrolling)
 export function renderInspector() {
   const box = $('#inspector');
-  if (!S.show) return;
+  if (!box || !S.show) return;
   const f = fixture(S.sel);
-  if (!f) {
-    box.replaceChildren(h('div.empty-insp',
-      h('h3', 'Nothing selected'),
-      h('span', 'Click a light on the stage to patch it to real hardware, rename it, or tune its limits.'),
-      h('button.btn.sm.primary', { onclick: openAddModal, style: { justifySelf: 'start' } }, '+ Add a light'),
-      S.lanUrls?.length ? h('span', 'Phone remote: open ', h('b.mono', S.lanUrls[0]), ' on the same Wi-Fi.') : null));
-    return;
-  }
+  if (!f) { box.replaceChildren(...stageColumns()); return; }
   const prof = S.profiles[f.kind] || {};
   const p = f.patch;
   const set = (k, v, rerender) => { f[k] = v; update(f, rerender); };
@@ -190,46 +160,78 @@ export function renderInspector() {
   const line = ['line', 'string'].includes(f.shape);
 
   box.replaceChildren(
-    h('div.insp-head',
-      h('span.insp-swatch', { style: { background: f.color === 'mono' ? f.tint : 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)' } }),
-      h('h3', f.name),
-      h('span.grow'),
-      h('button.btn.xs', { onclick: () => $('#inspector').classList.remove('open'), class: 'close-insp' }, '✕')),
-    h('div.insp-grid',
-      field('Name', h('input#fx-name', { type: 'text', value: f.name, oninput: (e) => { f.name = e.target.value; update(f); } }), 'full'),
-      field('Type', select(Object.entries(S.profiles).map(([k, v]) => [k, v.label]), f.kind, (v) => applyProfile(f, v), { id: 'fx-kind' }), 'full'),
-      field('Group', select([['floods', 'Floods'], ['strips', 'Strips'], ['strings', 'Strings'], ['bulbs', 'Bulbs']], f.group, (v) => set('group', v), { id: 'fx-group' })),
-      field('Colour', select([['rgb', 'RGB colour'], ['mono', 'Single colour']], f.color, (v) => set('color', v, true), { id: 'fx-color' })),
-      f.color === 'mono' ? field('Light tint', h('input#fx-tint', { type: 'color', value: f.tint, onchange: (e) => set('tint', e.target.value) })) : null,
-      line || f.pixels > 1 ? field(f.shape === 'string' ? 'Bulbs' : 'Pixels', h('input#fx-pixels', { type: 'number', min: 1, max: 1024, value: f.pixels,
-        onchange: (e) => set('pixels', Math.max(1, Math.min(1024, parseInt(e.target.value) || 1))) })) : null,
-      f.shape === 'flood' ? field('Aim °', h('input#fx-angle', { type: 'number', step: 5, value: f.angle, onchange: (e) => set('angle', parseFloat(e.target.value)) })) : null,
-      field('Size', h('input#fx-size', { type: 'range', min: 0.5, max: 2.5, step: 0.1, value: f.size || 1, oninput: (e) => set('size', parseFloat(e.target.value)) }))),
+    h('div.insp-col',
+      h('div.insp-head',
+        h('span.insp-swatch', { style: { background: f.color === 'mono' ? f.tint : 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)' } }),
+        h('h3', f.name), h('span.grow'),
+        h('button.btn.xs', { title: 'Close', onclick: () => { S.sel = null; emit('select'); } }, '✕')),
+      h('div.insp-grid',
+        field('Name', h('input#fx-name', { type: 'text', value: f.name, oninput: (e) => { f.name = e.target.value; update(f); } })),
+        field('Type', select(Object.entries(S.profiles).map(([k, v]) => [k, v.label]), f.kind, (v) => applyProfile(f, v), { id: 'fx-kind' })),
+        field('Group', select([['floods', 'Floods'], ['strips', 'Strips'], ['strings', 'Strings'], ['bulbs', 'Bulbs']], f.group, (v) => set('group', v), { id: 'fx-group' })),
+        field('Colour', select([['rgb', 'RGB colour'], ['mono', 'Single colour']], f.color, (v) => set('color', v, true), { id: 'fx-color' })),
+        f.color === 'mono' ? field('Light tint', h('input#fx-tint', { type: 'color', value: f.tint, onchange: (e) => set('tint', e.target.value) })) : null,
+        line || f.pixels > 1 ? field(f.shape === 'string' ? 'Bulbs' : 'Pixels', h('input#fx-pixels', { type: 'number', min: 1, max: 1024, value: f.pixels,
+          onchange: (e) => set('pixels', Math.max(1, Math.min(1024, parseInt(e.target.value) || 1))) })) : null,
+        f.shape === 'flood' ? field('Aim °', h('input#fx-angle', { type: 'number', step: 5, value: f.angle, onchange: (e) => set('angle', parseFloat(e.target.value)) })) : null,
+        field('Size', h('input#fx-size', { type: 'range', min: 0.5, max: 2.5, step: 0.1, value: f.size || 1, oninput: (e) => set('size', parseFloat(e.target.value)) }))),
+      h('div.insp-actions',
+        h('button.btn.sm', { onclick: () => send('identify', { id: f.id }) }, 'Identify'),
+        h('button.btn.sm', { onclick: () => send('fixture_duplicate', { id: f.id }) }, 'Duplicate'),
+        h('button.btn.sm', { onclick: (e) => {
+          const b = e.target;
+          if (b.dataset.armed) return send('fixture_delete', { ids: [f.id] });
+          b.dataset.armed = '1'; b.textContent = 'Really remove?'; b.classList.add('danger');
+        } }, 'Remove'))),
 
-    h('div.insp-section',
-      h('h4', 'Output'),
+    h('div.insp-col',
+      h('h4.muted', { style: { fontSize: '10.5px', letterSpacing: '.14em', textTransform: 'uppercase' } }, 'Output'),
       field('Send via', select(PROTOCOLS, p.protocol || 'none', (v) => { f.patch = defaultPatch(v, p); update(f, true); }, { id: 'fx-proto' })),
       ...patchFields(f, setP),
       h('p.insp-note', prof.notes || '')),
 
-    h('div.insp-section',
-      h('h4', 'Physical limits'),
+    h('div.insp-col',
+      h('h4.muted', { style: { fontSize: '10.5px', letterSpacing: '.14em', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between' } },
+        'Physical limits'),
       speedMeter(f.caps),
       ...CAPS.map(([k, label, hint]) => h('label.cap-row', h('span', label, h('small', hint)),
         h('input', { type: 'number', min: 0, step: k === 'update_hz' ? 1 : 5, value: f.caps[k], id: `cap-${k}`,
           onchange: (e) => { f.caps[k] = Math.max(k === 'update_hz' ? 1 : 0, parseFloat(e.target.value) || 0); update(f, true); } }))),
       h('button.btn.xs', { style: { justifySelf: 'start' }, onclick: () => { f.caps = pickCaps(prof); update(f, true); } }, 'Reset to type defaults')),
-
-    h('div.insp-actions',
-      h('button.btn.sm', { onclick: () => send('identify', { id: f.id }) }, 'Identify'),
-      h('button.btn.sm', { onclick: () => send('fixture_duplicate', { id: f.id }) }, 'Duplicate'),
-      h('span.grow'),
-      h('button.btn.sm', { onclick: (e) => {
-        const b = e.target;
-        if (b.dataset.armed) return send('fixture_delete', { ids: [f.id] });
-        b.dataset.armed = '1'; b.textContent = 'Really remove?'; b.classList.add('danger');
-      } }, 'Remove')),
   );
+}
+
+/** What the right side shows when no light is selected: stage setup + a rig summary. */
+function stageColumns() {
+  const st = S.show.settings.stage;
+  const counts = {};
+  S.show.fixtures.forEach((f) => (counts[f.kind] = (counts[f.kind] || 0) + 1));
+  const stageSet = (patch) => send('settings', { patch: { stage: { ...st, ...patch } } });
+  return [
+    h('div.insp-col',
+      h('div.insp-head', h('h3', 'Stage')),
+      h('div.row',
+        h('label.btn.sm', { style: { cursor: 'pointer' } }, 'Upload photo of your space',
+          h('input', { type: 'file', accept: 'image/*', hidden: true, onchange: (e) => loadBackground(e.target.files[0]) })),
+        st.background ? h('button.btn.sm', { onclick: () => stageSet({ background: '' }) }, 'Remove photo') : null),
+      h('div.insp-grid',
+        field('Shape', select([[1.7778, '16:9 wide'], [1.3333, '4:3'], [2.3333, '21:9 ultra-wide'], [1, 'Square']], st.aspect,
+          (v) => stageSet({ aspect: parseFloat(v) }), { id: 'stage-aspect' })),
+        field('Photo dim', h('input#stage-dim', { type: 'range', min: 0, max: 0.95, step: 0.05, value: st.bg_dim ?? 0.55,
+          onchange: (e) => stageSet({ bg_dim: parseFloat(e.target.value) }) })),
+        field('Haze', h('input#stage-haze', { type: 'range', min: 0, max: 1, step: 0.05, value: st.haze ?? 0.5,
+          onchange: (e) => stageSet({ haze: parseFloat(e.target.value) }) })))),
+    h('div.insp-col',
+      h('div.insp-head', h('h3', 'Placing lights')),
+      h('p.insp-note', 'Click a light on the stage or in the list to set it up. Drag to move it; drag the square handles to stretch strips and strings, the round handle to aim floods. Hold Shift to snap. Delete removes the selected light.')),
+    h('div.insp-col',
+      h('div.insp-head', h('h3', 'Your rig')),
+      Object.keys(counts).length
+        ? h('div', { style: { display: 'grid', gap: '4px' } }, Object.entries(counts).map(([k, n]) =>
+          h('div.row', { style: { justifyContent: 'space-between', fontSize: '12px', gap: '2px 8px' } },
+            h('span', `${n} × ${S.profiles[k]?.label || k}`), h('span.mono', { style: { color: 'var(--ok)', fontSize: '11px', whiteSpace: 'nowrap' } }, S.profiles[k]?.cost || ''))))
+        : h('p.insp-note', 'No lights yet.')),
+  ];
 }
 
 function pickCaps(prof) {

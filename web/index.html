@@ -60,36 +60,38 @@
     </div>
   </header>
 
-  <main id="main">
-    <section id="stage-wrap">
-      <canvas id="stage" tabindex="0" aria-label="Stage simulator: drag lights to move them"></canvas>
-      <div class="stage-hud">
-        <span id="hud-scene" class="hud-scene"></span>
-        <span id="hud-next" class="hud-next"></span>
-      </div>
-      <div class="stage-tools">
-        <button class="btn sm ghost" id="add-light" title="Add a light">+ Light</button>
-        <button class="btn sm ghost" id="toggle-labels" title="Show/hide labels">Labels</button>
-        <span class="perf" id="perf"></span>
-      </div>
-    </section>
-    <aside id="inspector" aria-label="Inspector"></aside>
-  </main>
+  <div id="body">
+    <div id="work">
+      <section id="stage-wrap">
+        <canvas id="stage" tabindex="0" aria-label="Stage simulator: drag lights to move them"></canvas>
+        <div class="stage-hud">
+          <span id="hud-scene" class="hud-scene"></span>
+          <span id="hud-next" class="hud-next"></span>
+        </div>
+        <div class="stage-tools">
+          <button class="btn sm ghost" id="add-light" title="Add a light">+ Light</button>
+          <button class="btn sm ghost" id="toggle-labels" title="Show/hide labels">Labels</button>
+          <span class="perf" id="perf"></span>
+        </div>
+      </section>
 
-  <section id="dock">
-    <nav class="tabs" role="tablist">
-      <button role="tab" data-tab="perform" class="active">Perform</button>
-      <button role="tab" data-tab="patterns">Patterns</button>
-      <button role="tab" data-tab="rig">Rig</button>
-      <button role="tab" data-tab="settings">Sync &amp; Settings</button>
-      <span class="grow"></span>
-      <span class="kbd-hint">Space beat 1 · T tap · 1-9 scenes · F flash · S strobe · B blackout</span>
-    </nav>
-    <div class="panel" id="tab-perform"></div>
-    <div class="panel" id="tab-patterns" hidden></div>
-    <div class="panel" id="tab-rig" hidden></div>
-    <div class="panel" id="tab-settings" hidden></div>
-  </section>
+      <section id="dock">
+        <nav class="tabs" role="tablist">
+          <button role="tab" data-tab="perform" class="active">Perform</button>
+          <button role="tab" data-tab="patterns">Patterns</button>
+          <button role="tab" data-tab="rig">Rig</button>
+          <button role="tab" data-tab="settings">Sync &amp; Settings</button>
+          <span class="grow"></span>
+          <span class="kbd-hint">Space beat 1 · T tap · 1-9 scenes · F flash · S strobe · B blackout</span>
+        </nav>
+        <div class="panel" id="tab-perform"></div>
+        <div class="panel" id="tab-patterns" hidden></div>
+        <div class="panel" id="tab-rig" hidden></div>
+        <div class="panel" id="tab-settings" hidden></div>
+      </section>
+    </div>
+    <aside id="rail" aria-label="Live controls"></aside>
+  </div>
 </div>
 <div id="toasts" aria-live="polite"></div>
 <div id="offline" hidden><div><strong>Reconnecting to LightingSim…</strong><span>Is the app still running?</span></div></div>

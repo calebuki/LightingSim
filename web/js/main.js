@@ -169,24 +169,10 @@ function initDock() {
   let saved = 'perform';
   try { saved = localStorage.getItem('ls.tab') || 'perform'; } catch {}
   showTab(saved);
-  const grip = document.createElement('div');
-  grip.className = 'dock-grip';
-  $('#dock').append(grip);
-  try { const h = localStorage.getItem('ls.dock'); if (h) document.documentElement.style.setProperty('--dock-h', h); } catch {}
-  grip.addEventListener('pointerdown', (e) => {
-    grip.setPointerCapture(e.pointerId);
-    const move = (ev) => {
-      const h = clamp(window.innerHeight - ev.clientY, 140, window.innerHeight - 180);
-      document.documentElement.style.setProperty('--dock-h', h + 'px');
-      emit('resize');
-    };
-    const up = () => {
-      grip.removeEventListener('pointermove', move);
-      try { localStorage.setItem('ls.dock', getComputedStyle(document.documentElement).getPropertyValue('--dock-h')); } catch {}
-    };
-    grip.addEventListener('pointermove', move);
-    grip.addEventListener('pointerup', up, { once: true });
-  });
+  // the dock sizes itself to the open tab; the stage takes whatever is left
+  on('tab', () => requestAnimationFrame(() => emit('resize')));
+  // clicking a light on the stage opens its settings
+  on('select', () => { if (S.sel && S.selFromStage) showTab('rig'); S.selFromStage = false; });
 }
 
 // ------------------------------------------------------------------ keyboard

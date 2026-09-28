@@ -38,17 +38,17 @@ const PARAM = {
 };
 
 let root, ed = null;
-const grids = []; // {el, tr} for playhead
+let selTrack = null; // id of the track whose settings are open
+const grids = []; // {grid, cells, t, last} for the playhead
 const sendScene = debounce(() => ed && send('scene_update', { scene: ed }), 90);
 
 export function initPatterns() {
   root = $('#tab-patterns');
-  on('init', render);
+  on('init', loadEditor);
   on('scenes', (id) => {
-    // someone else (or we) changed a scene: refresh list; refresh editor if it's another client's edit
-    renderList();
-    if (!ed || !scene(ed.id) || (id === ed.id && JSON.stringify(scene(id)) !== JSON.stringify(ed))) loadEditor();
-    if (S.editScene !== ed?.id) loadEditor();
+    // another client (e.g. a phone) edited this scene, or it was added/deleted: reload
+    if (!ed || !scene(ed.id) || S.editScene !== ed.id || (id === ed.id && JSON.stringify(scene(id)) !== JSON.stringify(ed))) loadEditor();
+    else renderHead();
   });
   on('palette', () => ed && renderEditor());
   on('fixtures', () => ed && renderWarnings());
@@ -56,37 +56,11 @@ export function initPatterns() {
   (function loop() { playhead(); requestAnimationFrame(loop); })();
 }
 
-function render() {
-  root.replaceChildren(h('div.patterns', h('div#scene-col', { style: { display: 'grid', gap: '10px', alignContent: 'start' } }), h('div.editor#editor')));
-  renderList();
-  loadEditor();
-}
-
 function commit(rerender = false) {
   const i = S.show.scenes.findIndex((s) => s.id === ed.id);
   if (i >= 0) S.show.scenes[i] = clone(ed);
   sendScene();
   if (rerender) renderEditor();
-  renderList();
-}
-
-// ------------------------------------------------------------------ scene list
-function renderList() {
-  const col = $('#scene-col', root);
-  if (!col) return;
-  const cur = S.status?.engine.current;
-  col.replaceChildren(
-    h('div.row',
-      h('button.btn.sm.primary', { onclick: newScene }, '+ New scene'),
-      h('button.btn.sm', { onclick: () => send('restore_presets'), title: 'Bring back any built-in presets you deleted' }, 'Restore presets')),
-    h('div.scene-list', S.show.bank.map((id) => {
-      const sc = scene(id);
-      if (!sc) return null;
-      return h('button.scene-item', {
-        class: [id === S.editScene ? 'sel' : '', id === cur ? 'live-now' : ''].join(' '),
-        onclick: () => { S.editScene = id; loadEditor(); renderList(); },
-      }, h('span.dotc', { style: { background: sc.color } }), sc.name, h('span.bars', `${sc.bars}b`));
-    })));
 }
 
 function newScene() {
@@ -101,39 +75,58 @@ function newTrack() {
     level: 1, blend: 'max', mute: false, solo: false };
 }
 
-// ------------------------------------------------------------------ editor
+// ------------------------------------------------------------------ layout
 function loadEditor() {
+  if (!scene(S.editScene)) S.editScene = S.show.bank[0] || null;
   const sc = scene(S.editScene);
   ed = sc ? clone(sc) : null;
+  if (ed && !ed.tracks.some((t) => t.id === selTrack)) selTrack = ed.tracks[0]?.id || null;
   renderEditor();
 }
 
 function renderEditor() {
-  const box = $('#editor', root);
-  if (!box) return;
+  if (!root) return;
   grids.length = 0;
-  if (!ed) { box.replaceChildren(h('p.muted', 'Pick a scene on the left, or make a new one.')); return; }
-  const previewing = S.status?.engine.preview === ed.id;
-  box.replaceChildren(
-    h('div.editor-head',
-      field('Scene', h('input.name#sc-name', { type: 'text', value: ed.name, oninput: (e) => { ed.name = e.target.value; commit(); } })),
-      field('Pad colour', h('input#sc-color', { type: 'color', value: ed.color || '#ff2d95', onchange: (e) => { ed.color = e.target.value; commit(); } })),
-      field('Loop', select([[1, '1 bar'], [2, '2 bars'], [4, '4 bars'], [8, '8 bars']], ed.bars, (v) => {
-        ed.bars = parseInt(v);
-        ed.tracks.forEach((t) => { if (t.gate.bars > ed.bars) resample(t, t.gate.div, ed.bars); });
-        commit(true);
-      }, { id: 'sc-bars' })),
-      h('label.check', { style: { height: '30px' } }, h('input#sc-utility', { type: 'checkbox', checked: !!ed.utility, onchange: (e) => { ed.utility = e.target.checked; commit(); } }), 'Utility'),
-      h('span.grow'),
-      h('button.btn.sm', { class: previewing ? 'on' : '', title: 'Play this scene on the rig while editing (overrides the live scene)',
-        onclick: (e) => { const on = S.status?.engine.preview !== ed.id; send('preview', { scene: on ? ed.id : null }); e.target.classList.toggle('on', on); } }, 'Audition'),
-      h('button.btn.sm', { onclick: () => send('launch', { scene: ed.id }) }, 'Launch'),
-      h('button.btn.sm', { onclick: () => send('scene_add', { scene: { ...clone(ed), name: ed.name + ' copy' } }) }, 'Duplicate'),
-      h('button.btn.sm', { onclick: (e) => confirmDelete(e.target) }, 'Delete')),
-    ...ed.tracks.map((t, i) => trackEl(t, i)),
-    h('button.add-track', { onclick: () => { ed.tracks.push(newTrack()); commit(true); } }, '+ Add track'),
-  );
+  if (!ed) {
+    root.replaceChildren(h('div.pat', h('div.pat-head', h('button.btn.sm.primary', { onclick: newScene }, '+ New scene'),
+      h('span.muted', 'No scenes yet.'))));
+    return;
+  }
+  const t = ed.tracks.find((x) => x.id === selTrack);
+  root.replaceChildren(h('div.pat',
+    h('div.pat-head#pat-head'),
+    h('div.trows', ed.tracks.map((tr, i) => trackRow(tr, i)),
+      h('div.row', { style: { paddingLeft: '6px' } },
+        h('button.btn.xs', { onclick: () => { const nt = newTrack(); ed.tracks.push(nt); selTrack = nt.id; commit(true); } }, '+ Add track'))),
+    t ? trackPanel(t, ed.tracks.indexOf(t)) : null));
+  renderHead();
   renderWarnings();
+}
+
+function renderHead() {
+  const box = $('#pat-head', root);
+  if (!box || !ed) return;
+  const previewing = S.status?.engine.preview === ed.id;
+  const opts = S.show.bank.map((id) => scene(id)).filter(Boolean).map((s) => [s.id, `${s.name}  (${s.bars} bar${s.bars > 1 ? 's' : ''})`]);
+  box.replaceChildren(
+    select(opts, ed.id, (v) => { S.editScene = v; selTrack = null; loadEditor(); }, { class: 'scene-pick', 'aria-label': 'Scene to edit' }),
+    h('input.name#sc-name', { type: 'text', value: ed.name, 'aria-label': 'Scene name', oninput: (e) => { ed.name = e.target.value; commit(); } }),
+    h('input#sc-color', { type: 'color', value: ed.color || '#ff2d95', title: 'Pad colour', onchange: (e) => { ed.color = e.target.value; commit(); } }),
+    select([[1, 'Loop 1 bar'], [2, 'Loop 2 bars'], [4, 'Loop 4 bars'], [8, 'Loop 8 bars']], ed.bars, (v) => {
+      ed.bars = parseInt(v);
+      ed.tracks.forEach((x) => { if (x.gate.bars > ed.bars) resample(x, x.gate.div, ed.bars); });
+      commit(true);
+    }, { id: 'sc-bars', 'aria-label': 'Loop length', style: 'height:30px' }),
+    h('label.check', { title: 'Utility pads (like Full White) are skipped by autopilot' },
+      h('input#sc-utility', { type: 'checkbox', checked: !!ed.utility, onchange: (e) => { ed.utility = e.target.checked; commit(); } }), 'Utility'),
+    h('span.grow'),
+    h('button.btn.sm', { class: previewing ? 'on' : '', title: 'Play this scene on the rig while editing (overrides the live scene)',
+      onclick: (e) => { const on = S.status?.engine.preview !== ed.id; send('preview', { scene: on ? ed.id : null }); e.target.classList.toggle('on', on); } }, 'Audition'),
+    h('button.btn.sm', { onclick: () => send('launch', { scene: ed.id }) }, 'Launch'),
+    h('button.btn.sm', { onclick: newScene }, '+ New'),
+    h('button.btn.sm', { onclick: () => send('scene_add', { scene: { ...clone(ed), name: ed.name + ' copy' } }) }, 'Duplicate'),
+    h('button.btn.sm', { onclick: (e) => confirmDelete(e.target) }, 'Delete'),
+    h('button.btn.sm.ghost', { onclick: () => send('restore_presets'), title: 'Bring back any built-in presets you deleted' }, 'Restore presets'));
 }
 
 function confirmDelete(btn) {
@@ -170,10 +163,32 @@ function resample(t, div, bars) {
   g.div = div; g.bars = bars; g.steps = out;
 }
 
-function trackEl(t, i) {
+function targetLabel(t) {
+  const tg = t.target?.length ? t.target : ['all'];
+  return tg.includes('all') ? 'All lights' : tg.map((g) => g[0].toUpperCase() + g.slice(1)).join(' + ');
+}
+
+// ------------------------------------------------------------------ one row per track
+function trackRow(t, i) {
   const g = t.gate;
-  const fx = t.effect;
-  const card = h('div.track', { class: t.mute ? 'muted-t' : '' });
+  const pal = S.show.palette.colors;
+  const c0 = t.effect.type === 'rainbow' ? 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)' : colorOf((t.effect.colors || ['p0'])[0], pal);
+  const row = h('div.trow', { class: [t.id === selTrack ? 'sel' : '', t.mute ? 'muted-t' : ''].join(' '), 'data-track': t.id },
+    h('button.tlabel', { onclick: () => { selTrack = t.id; renderEditor(); }, title: 'Edit this track' },
+      h('span.dotc', { style: { background: c0 } }),
+      h('b', t.name), h('small', `${targetLabel(t)} · ${DIV_LABEL[g.div]}`), h('span.wicon.warn', { hidden: true, title: 'Some lights can’t keep up' }, '')),
+    stepGrid(t),
+    h('div.trow-tools',
+      h('button.btn.xs', { class: t.mute ? 'on' : '', title: 'Mute', onclick: () => { t.mute = !t.mute; commit(true); } }, 'M'),
+      h('button.btn.xs', { class: t.solo ? 'on' : '', title: 'Solo', onclick: () => { t.solo = !t.solo; commit(true); } }, 'S'),
+      h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: t.level, title: 'Track level', 'aria-label': `${t.name} level`, style: { width: '70px' },
+        oninput: (e) => { t.level = parseFloat(e.target.value); commit(); } })));
+  return row;
+}
+
+// ------------------------------------------------------------------ settings panel for the selected track
+function trackPanel(t, i) {
+  const g = t.gate;
   const target = t.target?.length ? t.target : ['all'];
   const setTarget = (grp) => {
     if (grp === 'all') t.target = ['all'];
@@ -185,36 +200,31 @@ function trackEl(t, i) {
     commit(true);
   };
   const maxBars = maxBarsFor(g.div);
-  card.append(
-    h('div.track-head',
-      h('input.tname', { type: 'text', value: t.name, 'aria-label': 'Track name', oninput: (e) => { t.name = e.target.value; commit(); } }),
+  const fill = (fn) => () => { fn(); commit(true); };
+  return h('div.tpanel',
+    h('div.ctl',
+      field('Track', h('input.tname', { type: 'text', value: t.name, oninput: (e) => { t.name = e.target.value; commit(); } })),
       h('span.chips', ['all', ...GROUPS].map((grp) =>
         h('button.chip', { class: target.includes(grp) ? 'on' : '', onclick: () => setTarget(grp) }, grp === 'all' ? 'All' : grp[0].toUpperCase() + grp.slice(1)))),
-      h('span.grow'),
-      h('button.btn.xs', { class: t.mute ? 'on' : '', title: 'Mute', onclick: () => { t.mute = !t.mute; commit(true); } }, 'M'),
-      h('button.btn.xs', { class: t.solo ? 'on' : '', title: 'Solo', onclick: () => { t.solo = !t.solo; commit(true); } }, 'S'),
-      h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: t.level, title: 'Track level', style: { width: '80px' },
-        oninput: (e) => { t.level = parseFloat(e.target.value); commit(); } }),
-      select(BLEND, t.blend || 'max', (v) => { t.blend = v; commit(); }, { title: 'How this track mixes with the ones above', style: 'height:26px;font-size:12px' }),
-      h('button.btn.xs', { title: 'Move up', disabled: i === 0, onclick: () => { ed.tracks.splice(i - 1, 0, ed.tracks.splice(i, 1)[0]); commit(true); } }, '↑'),
-      h('button.btn.xs', { title: 'Move down', disabled: i === ed.tracks.length - 1, onclick: () => { ed.tracks.splice(i + 1, 0, ed.tracks.splice(i, 1)[0]); commit(true); } }, '↓'),
-      h('button.btn.xs', { title: 'Duplicate track', onclick: () => { ed.tracks.splice(i + 1, 0, { ...clone(t), id: uid('tr'), name: t.name + ' 2' }); commit(true); } }, '⧉'),
-      h('button.btn.xs', { title: 'Delete track', onclick: () => { ed.tracks.splice(i, 1); commit(true); } }, '✕')),
-
-    h('div.gate-controls',
       field('Step', select(S.divs.map((d) => [d, DIV_LABEL[d]]), g.div, (v) => { const d = parseInt(v); resample(t, d, Math.min(g.bars, maxBarsFor(d))); commit(true); })),
       field('Length', select([1, 2, 4, 8].filter((b) => b <= maxBars).map((b) => [b, `${b} bar${b > 1 ? 's' : ''}`]), Math.min(g.bars, maxBars),
         (v) => { resample(t, g.div, parseInt(v)); commit(true); })),
       field('Envelope', select(ENV, g.env, (v) => { g.env = v; commit(); renderWarnings(); })),
-      field('Length %', h('input', { type: 'number', min: 5, max: 100, step: 5, value: Math.round((g.duty ?? 0.5) * 100),
+      field('On %', h('input', { type: 'number', min: 5, max: 100, step: 5, value: Math.round((g.duty ?? 0.5) * 100),
         title: 'Gate on-time or decay length, as % of a step', onchange: (e) => { g.duty = clamp(e.target.value / 100, 0.05, 1); commit(); renderWarnings(); } })),
       field('Spread', select(SPREAD, g.spread, (v) => { g.spread = v; commit(); })),
       field('Slow lights', select(FALLBACK, g.fallback, (v) => { g.fallback = v; commit(); renderWarnings(); }, { title: 'What lights that can’t switch this fast should do' })),
       g.div % 2 === 0 ? field('Swing %', h('input', { type: 'number', min: 0, max: 60, step: 5, value: Math.round((g.swing || 0) * 100),
-        onchange: (e) => { g.swing = clamp(e.target.value / 100, 0, 0.6); commit(); } })) : null),
-
-    stepGrid(t),
+        onchange: (e) => { g.swing = clamp(e.target.value / 100, 0, 0.6); commit(); } })) : null,
+      field('Mix', select(BLEND, t.blend || 'max', (v) => { t.blend = v; commit(); }, { title: 'How this track mixes with the ones above' })),
+      h('span.row', { style: { gap: '3px', alignSelf: 'end' } },
+        h('button.btn.xs', { title: 'Move up', disabled: i === 0, onclick: () => { ed.tracks.splice(i - 1, 0, ed.tracks.splice(i, 1)[0]); commit(true); } }, '↑'),
+        h('button.btn.xs', { title: 'Move down', disabled: i === ed.tracks.length - 1, onclick: () => { ed.tracks.splice(i + 1, 0, ed.tracks.splice(i, 1)[0]); commit(true); } }, '↓'),
+        h('button.btn.xs', { title: 'Duplicate track', onclick: () => { const c = { ...clone(t), id: uid('tr'), name: t.name + ' 2' }; ed.tracks.splice(i + 1, 0, c); selTrack = c.id; commit(true); } }, '⧉'),
+        h('button.btn.xs', { title: 'Delete track', onclick: () => { ed.tracks.splice(i, 1); selTrack = ed.tracks[Math.max(0, i - 1)]?.id; commit(true); } }, '✕'))),
+    effectRow(t),
     h('div.step-tools',
+      h('span.muted', { style: { fontSize: '11px', marginRight: '4px' } }, 'Steps:'),
       ...[['All', () => g.steps.fill(1)], ['None', () => g.steps.fill(0)],
         ['Beats', () => g.steps.forEach((_, k) => (g.steps[k] = k % g.div === 0 ? 1 : 0))],
         ['Offbeats', () => g.steps.forEach((_, k) => (g.steps[k] = g.div >= 2 && k % g.div === g.div / 2 ? 1 : 0))],
@@ -222,18 +232,15 @@ function trackEl(t, i) {
         ['Invert', () => g.steps.forEach((v, k) => (g.steps[k] = v > 0 ? 0 : 1))],
         ['◀', () => g.steps.push(g.steps.shift())], ['▶', () => g.steps.unshift(g.steps.pop())],
         ['Random', () => g.steps.forEach((_, k) => (g.steps[k] = Math.random() < 0.35 ? (Math.random() < 0.3 ? 0.5 : 1) : 0))],
-      ].map(([label, fn]) => h('button.btn.xs', { onclick: () => { fn(); commit(true); } }, label)),
-      h('span.muted', { style: { fontSize: '11px', alignSelf: 'center', marginLeft: '6px' } }, 'Click/drag to paint · Shift or right-click = half brightness')),
-    h('div.warnings', { 'data-track': t.id }),
-    effectRow(t),
-  );
-  return card;
+      ].map(([label, fn]) => h('button.btn.xs', { onclick: fill(fn) }, label)),
+      h('span.muted', { style: { fontSize: '11px', marginLeft: '6px' } }, 'Click/drag the grid to paint · Shift or right-click = half')),
+    h('div.warnings', { 'data-track': t.id }));
 }
 
 function stepGrid(t) {
   const g = t.gate;
   const n = g.steps.length;
-  const grid = h('div.steps', { style: { gridTemplateColumns: `repeat(${n}, minmax(${n > 64 ? 7 : 11}px, 1fr))` } });
+  const grid = h('div.steps', { style: { gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))` } });
   const cells = g.steps.map((v, k) => h('div.step', {
     'data-k': k,
     class: [k % (g.div * 4) === 0 ? 'bar' : k % g.div === 0 ? 'beat' : '', v >= 0.99 ? 'v1' : v > 0 ? 'vh' : ''].join(' '),
@@ -252,6 +259,7 @@ function stepGrid(t) {
     const cell = e.target.closest('.step');
     if (!cell) return;
     e.preventDefault();
+    if (selTrack !== t.id) { selTrack = t.id; root.querySelectorAll('.trow').forEach((r) => r.classList.toggle('sel', r.dataset.track === t.id)); }
     const cur = g.steps[+cell.dataset.k];
     const half = e.shiftKey || e.button === 2;
     paint = cur > 0 && (!half || cur < 0.99) ? 0 : half ? 0.5 : 1;
@@ -263,17 +271,22 @@ function stepGrid(t) {
     const el = document.elementFromPoint(e.clientX, e.clientY);
     if (el && el.parentElement === grid) apply(el);
   });
-  const end = () => { if (paint != null) { paint = null; commit(); } };
+  const end = () => {
+    if (paint == null) return;
+    paint = null;
+    commit();
+    if (!root.querySelector(`.tpanel .warnings[data-track="${t.id}"]`)) renderEditor(); // switched track: show its settings
+  };
   grid.addEventListener('pointerup', end);
   grid.addEventListener('pointercancel', end);
   grids.push({ grid, cells, t, last: -1 });
-  return h('div.steps-wrap', grid);
+  return grid;
 }
 
 function effectRow(t) {
   const fx = t.effect;
   const def = FX[fx.type] || FX.solid;
-  const row = h('div.fx-controls',
+  const row = h('div.ctl',
     field('Look', select(Object.entries(FX).map(([k, v]) => [k, v.label]), fx.type, (v) => {
       const d = FX[v];
       const keep = fx.colors || ['p0'];
@@ -291,7 +304,7 @@ function effectRow(t) {
     if (P.kind === 'rate') ctl = select(RATE_OPTS, val, (v) => set(parseFloat(v)));
     else if (P.kind === 'axis') ctl = select(AXIS, val, set);
     else if (P.kind === 'bool') ctl = h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked), style: { height: '28px' } });
-    else if (P.kind === 'unit') ctl = h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: val, style: { width: '90px', height: '28px' }, oninput: (e) => set(parseFloat(e.target.value)) });
+    else if (P.kind === 'unit') ctl = h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: val, style: { width: '84px', height: '28px' }, oninput: (e) => set(parseFloat(e.target.value)) });
     else ctl = h('input', { type: 'number', min: P.min, max: P.max, step: P.step, value: val, onchange: (e) => set(parseFloat(e.target.value)) });
     row.append(field(P.label, ctl));
   }
@@ -366,12 +379,16 @@ function renderWarnings() {
   if (!ed) return;
   for (const t of ed.tracks) {
     const box = root.querySelector(`.warnings[data-track="${t.id}"]`);
-    if (!box) continue;
+    if (!box) continue; // only the open track shows its warnings in full
     const ws = analyzeTrack(t);
     const key = JSON.stringify(ws);
     if (box.dataset.key === key) continue;
     box.dataset.key = key;
     box.replaceChildren(...ws.map((w) => h('div.warn', { class: w.info ? 'info' : '' }, w.text)));
+  }
+  for (const t of ed.tracks) {
+    const icon = root.querySelector(`.trow[data-track="${t.id}"] .wicon`);
+    if (icon) icon.hidden = !analyzeTrack(t).some((w) => !w.info);
   }
 }
 let lastWarn = 0;

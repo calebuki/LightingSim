@@ -1,6 +1,6 @@
 // Stage simulator: draws the rig, emulates each light's physical fade, lets you move lights.
 import { S, send, fixture } from './state.js';
-import { $, clamp, emit, on, throttle } from './util.js';
+import { $, clamp, emit, on, showTab, throttle } from './util.js';
 
 let cv, ctx, W = 0, H = 0, dpr = 1;
 let rect = { ox: 0, oy: 0, w: 1, h: 1 };
@@ -354,7 +354,7 @@ function onDown(e) {
   const p = toNorm(e);
   const h = hit(p.x, p.y);
   if (!h) { if (S.sel) { S.sel = null; emit('select'); } return; }
-  if (S.sel !== h.f.id) { S.sel = h.f.id; emit('select'); }
+  if (S.sel !== h.f.id) { S.sel = h.f.id; S.selFromStage = true; emit('select'); }
   cv.setPointerCapture(e.pointerId);
   drag = { mode: h.mode, id: h.f.id, start: p, orig: { ...h.f } };
 }
@@ -405,7 +405,7 @@ export function initStage() {
   cv.addEventListener('pointerup', onUp);
   cv.addEventListener('pointercancel', onUp);
   cv.addEventListener('pointerleave', () => (hover = null));
-  cv.addEventListener('dblclick', () => $('#inspector').classList.add('open'));
+  cv.addEventListener('dblclick', () => S.sel && showTab('rig'));
   $('#toggle-labels').onclick = () => {
     const st = S.show.settings.stage;
     send('settings', { patch: { stage: { ...st, show_labels: !st.show_labels } } });
