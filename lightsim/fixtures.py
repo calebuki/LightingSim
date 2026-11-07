@@ -156,6 +156,21 @@ PROFILES: dict[str, dict] = {
         "cost": "$40 4-ch DMX dimmer pack",
         "notes": "Filaments glow up/down slowly - great for warm chases, not strobes.",
     },
+    "tv": {
+        "label": "TV / Screen",
+        "group": "screens",
+        "shape": "screen",
+        "color": "rgb",
+        "pixels": 0,
+        "update_hz": 60,
+        "latency_ms": 50,
+        "rise_ms": 0,
+        "fall_ms": 0,
+        "min_pulse_ms": 0,
+        "protocol": "none",
+        "cost": "the TV you have",
+        "notes": "Plays the scene's visual. latency_ms is the TV's input lag.",
+    },
     "virtual": {
         "label": "Virtual (simulate only)",
         "group": "bulbs",
@@ -174,8 +189,8 @@ PROFILES: dict[str, dict] = {
 }
 
 CAP_KEYS = ("update_hz", "latency_ms", "rise_ms", "fall_ms", "min_pulse_ms")
-SHAPES = ("flood", "line", "string", "bulb")
-GROUPS = ("floods", "strips", "strings", "bulbs")
+SHAPES = ("flood", "line", "string", "bulb", "screen")
+GROUPS = ("floods", "strips", "strings", "bulbs", "screens")
 
 
 def new_id(prefix: str = "fx") -> str:
@@ -203,6 +218,7 @@ def make_fixture(kind: str, x: float = 0.5, y: float = 0.5, **over) -> dict:
         "sag": 0.06 if shape == "string" else 0.0,
         "angle": 90.0 if shape == "flood" else 0.0,  # beam direction, degrees (90 = down)
         "size": 1.0,
+        "wall": "",  # screens in the same group share one picture
         "caps": {k: p[k] for k in CAP_KEYS},
         "patch": _default_patch(p),
     }
@@ -229,7 +245,7 @@ def normalize_fixture(fx: dict) -> dict:
     out.update({k: v for k, v in fx.items() if k not in ("caps", "patch")})
     out["caps"] = {**base["caps"], **(fx.get("caps") or {})}
     out["patch"] = {**base["patch"], **(fx.get("patch") or {})}
-    out["pixels"] = max(1, min(1024, int(out.get("pixels", 1))))
+    out["pixels"] = 0 if out.get("shape") == "screen" else max(1, min(1024, int(out.get("pixels", 1))))
     return out
 
 

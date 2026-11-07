@@ -1,6 +1,10 @@
-// Stage simulator: draws the rig, emulates each light's physical fade, lets you move lights.
+// Stage simulator: emulates each light's physical fade, feeds the renderer in stage-gl.js,
+// paints the hardware, and lets you move lights (Rig tab).
 import { S, send, fixture } from './state.js';
-import { $, clamp, emit, on, showTab, throttle } from './util.js';
+import { $, clamp, emit, on, throttle } from './util.js';
+import { wallOutputs } from './tvpanel.js';
+import { tvBox } from './visuals/walls.js';
+import { StageRenderer } from './stage-gl.js';
 
 let cv, ctx, W = 0, H = 0, dpr = 1;
 let rect = { ox: 0, oy: 0, w: 1, h: 1 };
@@ -9,7 +13,18 @@ let disp = new Float32Array(0);
 let bgImg = null, bgSrc = '';
 let drag = null, hover = null;
 let lastT = performance.now();
-const sprites = new Map();
+let gl = null, glCanvas = null;
+let nextDraw = 0, startT = performance.now();
+let bodiesDirty = true;
+const bodies = document.createElement('canvas');
+// the light each picture throws on the room: every picture, small, one above another
+const spill = document.createElement('canvas');
+spill.width = 128;
+const spillCtx = spill.getContext('2d', { alpha: false });
+const SPREAD = 0.38; // flood half-angle, radians
+const FLOOR = 0.84; // where the wall meets the floor, unless the stage is a photo
+let pointData = new Float32Array(9 * 256), floodData = new Float32Array(12 * 32), poolData = new Float32Array(8 * 64);
+const canEdit = () => S.tab === 'rig';
 
 // ------------------------------------------------------------------ geometry
 export function pixelPositions(fx) {
@@ -34,6 +49,7 @@ function rebuildLayout() {
   const P = offsets[offsets.length - 1];
   if (P !== lay.P) disp = new Float32Array(P * 3);
   lay = { P, offsets, pos };
+  bodiesDirty = true;
 }
 const px = (x) => rect.ox + x * rect.w;
 const py = (y) => rect.oy + y * rect.h;
@@ -45,33 +61,18 @@ function resize() {
   W = wrap.clientWidth; H = wrap.clientHeight;
   cv.width = Math.max(1, W * dpr); cv.height = Math.max(1, H * dpr);
   const aspect = S.show?.settings.stage.aspect || 16 / 9;
-  let w = W - 24, h = w / aspect;
-  if (h > H - 24) { h = H - 24; w = h * aspect; }
+  let w = W, h = w / aspect;
+  if (h > H) { h = H; w = h * aspect; }
   rect = { ox: (W - w) / 2, oy: (H - h) / 2, w: Math.max(w, 10), h: Math.max(h, 10) };
-}
-
-// ------------------------------------------------------------------ glow sprites
-function sprite(r, g, b) {
-  const m = Math.max(r, g, b, 1);
-  const q = (v) => Math.round((v / m) * 15);
-  const key = (q(r) << 8) | (q(g) << 4) | q(b);
-  let s = sprites.get(key);
-  if (!s) {
-    s = document.createElement('canvas');
-    s.width = s.height = 128;
-    const c = s.getContext('2d');
-    const cr = Math.round((q(r) / 15) * 255), cg = Math.round((q(g) / 15) * 255), cb = Math.round((q(b) / 15) * 255);
-    const grd = c.createRadialGradient(64, 64, 0, 64, 64, 64);
-    grd.addColorStop(0, `rgba(${cr},${cg},${cb},1)`);
-    grd.addColorStop(0.18, `rgba(${cr},${cg},${cb},.55)`);
-    grd.addColorStop(0.5, `rgba(${cr},${cg},${cb},.14)`);
-    grd.addColorStop(1, `rgba(${cr},${cg},${cb},0)`);
-    c.fillStyle = grd;
-    c.fillRect(0, 0, 128, 128);
-    if (sprites.size > 600) sprites.clear();
-    sprites.set(key, s);
+  if (glCanvas && W && H) {
+    glCanvas.style.left = `${rect.ox}px`;
+    glCanvas.style.top = `${rect.oy}px`;
+    glCanvas.style.width = `${rect.w}px`;
+    glCanvas.style.height = `${rect.h}px`;
+    const scale = Math.min(1.5, window.devicePixelRatio || 1, 1920 / rect.w);
+    gl?.resize(Math.round(rect.w * scale), Math.round(rect.h * scale));
+    bodiesDirty = true;
   }
-  return s;
 }
 
 // ------------------------------------------------------------------ physics
@@ -90,187 +91,275 @@ function stepPhysics(dt) {
   }
 }
 
+// ------------------------------------------------------------------ the scene for the renderer
+const linear = (v) => (v / 255) ** 2.2;
+
+function buildScene(outputs) {
+  const st = S.show.settings.stage;
+  const placed = new Map();
+  outputs.forEach((o, n) => o.wall.tvs.forEach((t) => placed.set(t.f.id, { n, id: o.id, region: t.region })));
+  const fxs = S.show.fixtures;
+  const aspect = rect.w / rect.h;
+  const floor = bgImg ? 9 : FLOOR;
+  if (pointData.length < (lay.P + 64) * 9) pointData = new Float32Array((lay.P + 64) * 18);
+  let np = 0, nf = 0, npool = 0;
+  let gr = 0, gg = 0, gb = 0;
+  const screens = [];
+
+  const point = (x, y, r, g, b, power, h, core, kind) => {
+    const o = np++ * 9;
+    pointData[o] = x; pointData[o + 1] = y;
+    pointData[o + 2] = r; pointData[o + 3] = g; pointData[o + 4] = b;
+    pointData[o + 5] = power; pointData[o + 6] = h; pointData[o + 7] = core; pointData[o + 8] = kind;
+  };
+  const pool = (x, y, r, g, b, power, rx, ry) => {
+    if (npool * 8 >= poolData.length) return;
+    const o = npool++ * 8;
+    poolData[o] = x; poolData[o + 1] = y;
+    poolData[o + 2] = r; poolData[o + 3] = g; poolData[o + 4] = b;
+    poolData[o + 5] = power; poolData[o + 6] = rx; poolData[o + 7] = ry;
+  };
+
+  fxs.forEach((f, i) => {
+    const size = f.size || 1;
+    if (f.shape === 'screen') {
+      const place = placed.get(f.id);
+      if (!place) return;
+      const box = tvBox(f, aspect);
+      const hw = box.w / 2, hh = box.h / 2;
+      const cx = f.x * aspect, cy = f.y;
+      const [u, v, du, dv] = place.region;
+      screens.push({ x: cx, y: cy, hw, hh, picture: place.id, region: place.region });
+      // the picture lights the wall around it, each patch in its own colour
+      for (let a = 0; a < 4; a++) {
+        for (let b = 0; b < 3; b++) {
+          const pv = v + dv * (1 - (b + 0.5) / 3);
+          point(cx + ((a + 0.5) / 4 - 0.5) * 2 * hw, cy + ((b + 0.5) / 3 - 0.5) * 2 * hh, u + du * ((a + 0.5) / 4), (place.n + pv) / outputs.length, 0, 0.012 * size, 0.1, 0, 4);
+        }
+      }
+      return;
+    }
+    const start = lay.offsets[i];
+    const pts = lay.pos[i];
+    const filament = f.kind === 'bulb_incandescent';
+    for (let k = 0; k < f.pixels; k++) {
+      const j = (start + k) * 3;
+      const m = Math.max(disp[j], disp[j + 1], disp[j + 2]);
+      if (m < 1.2) continue;
+      let r = linear(disp[j]), g = linear(disp[j + 1]), b = linear(disp[j + 2]);
+      if (filament) { // a dimmed filament runs cooler, and glows redder
+        const l = Math.max(r, g, b);
+        g *= l ** 0.28;
+        b *= l ** 0.75;
+      }
+      const x = pts[k][0] * aspect, y = pts[k][1];
+      if (f.shape === 'line') {
+        point(x, y, r, g, b, 0.0009 * size, 0.03, 0.0034 * size, 0);
+        gr += r * 0.0015; gg += g * 0.0015; gb += b * 0.0015;
+      } else if (f.shape === 'string') {
+        point(x, y + 0.008 * size, r, g, b, 0.011 * size, 0.07, 0.0078 * size, 1);
+        gr += r * 0.004; gg += g * 0.004; gb += b * 0.004;
+      } else if (f.shape === 'bulb') {
+        point(x, y, r, g, b, 0.06 * size, 0.22, 0.0155 * size, filament ? 3 : 2);
+        gr += r * 0.012; gg += g * 0.012; gb += b * 0.012;
+      } else if (f.shape === 'flood') {
+        if (nf * 12 >= floodData.length) continue;
+        const power = (f.kind === 'strobe_dmx' ? 1.3 : 0.8) * size;
+        const a = (f.angle * Math.PI) / 180;
+        const dx = Math.cos(a), dy = Math.sin(a);
+        const lensR = 0.019 * size;
+        const back = lensR / Math.tan(SPREAD);
+        const lensX = x + dx * 0.012 * size, lensY = y + dy * 0.012 * size;
+        let L = 1.9;
+        if (floor < 2 && y < floor && dy > 0.05) {
+          const t = (floor + 0.05 - lensY) / dy;
+          L = Math.min(L, t + back + 0.08);
+          // where the beam lands: a pool, flattened by the view across the floor
+          const rx = t * Math.tan(SPREAD) * 1.05 + 0.05;
+          pool(lensX + dx * t, floor + 0.05, r, g, b, (power * 2.2) / (1 + t * t * 1.5), rx, rx * 0.2);
+        } else if (floor < 2 && y >= floor) {
+          pool(x, y + 0.006, r, g, b, power * 0.5, 0.1 * size, 0.022 * size);
+        }
+        const o = nf++ * 12;
+        floodData[o] = lensX - dx * back; floodData[o + 1] = lensY - dy * back;
+        floodData[o + 2] = r; floodData[o + 3] = g; floodData[o + 4] = b;
+        floodData[o + 5] = power; floodData[o + 6] = a; floodData[o + 7] = SPREAD; floodData[o + 8] = L;
+        floodData[o + 9] = back; floodData[o + 10] = i * 0.37; floodData[o + 11] = lensR;
+        gr += r * 0.04 * power; gg += g * 0.04 * power; gb += b * 0.04 * power;
+      }
+    }
+  });
+
+  const glow = 0.1;
+  return {
+    aspect, floor, time: (performance.now() - startT) / 1000,
+    haze: (st.haze ?? 0.5) * 1.1,
+    ambient: 0.004 + (st.room ?? 0.1) * (bgImg ? 0.55 : 0.28),
+    glow: [gr * glow, gg * glow, gb * glow],
+    points: pointData, nPoints: np,
+    floods: floodData, nFloods: nf,
+    pools: poolData, nPools: npool,
+    screens,
+  };
+}
+
+// ------------------------------------------------------------------ hardware
+/** Paints what the lights hang from and are made of, as reflectance: light from elsewhere picks it out. */
+function paintBodies() {
+  const W2 = gl.w, H2 = gl.h;
+  if (bodies.width !== W2 || bodies.height !== H2) { bodies.width = W2; bodies.height = H2; }
+  const c = bodies.getContext('2d');
+  c.clearRect(0, 0, W2, H2);
+  if (bgImg && bgImg.complete && bgImg.naturalWidth) c.drawImage(bgImg, 0, 0, W2, H2);
+  const X = (x) => x * W2, Y = (y) => y * H2;
+  const u = H2 / 620;
+  c.lineCap = 'round';
+  S.show.fixtures.forEach((f, i) => {
+    const size = f.size || 1, s = size * u;
+    const pts = lay.pos[i];
+    if (f.shape === 'line') {
+      // aluminium channel with the LED tape inside it
+      c.strokeStyle = '#3a3a38'; c.lineWidth = 5.5 * s;
+      c.beginPath(); c.moveTo(X(f.x), Y(f.y)); c.lineTo(X(f.x2), Y(f.y2)); c.stroke();
+      c.strokeStyle = '#70706c'; c.lineWidth = 1 * s;
+      c.beginPath(); c.moveTo(X(f.x), Y(f.y) - 2.6 * s); c.lineTo(X(f.x2), Y(f.y2) - 2.6 * s); c.stroke();
+      c.strokeStyle = '#141413'; c.lineWidth = 2.8 * s;
+      c.beginPath(); c.moveTo(X(f.x), Y(f.y)); c.lineTo(X(f.x2), Y(f.y2)); c.stroke();
+    } else if (f.shape === 'string') {
+      c.strokeStyle = '#101010'; c.lineWidth = Math.max(1, 1.4 * u);
+      c.beginPath();
+      for (let k = 0; k <= 40; k++) {
+        const t = k / 40;
+        const x = f.x + (f.x2 - f.x) * t, y = f.y + (f.y2 - f.y) * t + (f.sag || 0) * 4 * t * (1 - t);
+        k ? c.lineTo(X(x), Y(y)) : c.moveTo(X(x), Y(y));
+      }
+      c.stroke();
+      for (const p of pts) {
+        const x = X(p[0]), y = Y(p[1]);
+        c.fillStyle = '#1a1a19';
+        c.fillRect(x - 2.2 * s, y - 1 * s, 4.4 * s, 4.6 * s);
+        const g = c.createRadialGradient(x - 1.5 * s, y + 3.5 * s, 0, x, y + 5 * s, 5 * s);
+        g.addColorStop(0, 'rgba(235,232,224,.75)');
+        g.addColorStop(1, 'rgba(150,148,140,.45)');
+        c.fillStyle = g;
+        c.beginPath(); c.arc(x, y + 5 * s, 4.8 * s, 0, 7); c.fill();
+      }
+    } else if (f.shape === 'bulb') {
+      const x = X(f.x), y = Y(f.y);
+      c.strokeStyle = '#101010'; c.lineWidth = Math.max(1, 1.5 * u);
+      c.beginPath(); c.moveTo(x, 0); c.lineTo(x, y - 14 * s); c.stroke();
+      const brass = c.createLinearGradient(x - 5 * s, 0, x + 5 * s, 0);
+      brass.addColorStop(0, '#2a2925'); brass.addColorStop(0.45, '#6b6a62'); brass.addColorStop(1, '#1f1e1b');
+      c.fillStyle = brass;
+      c.fillRect(x - 4.6 * s, y - 16 * s, 9.2 * s, 8 * s);
+      const g = c.createRadialGradient(x - 3 * s, y - 3 * s, 0.5 * s, x, y, 10 * s);
+      g.addColorStop(0, 'rgba(240,238,230,.8)');
+      g.addColorStop(0.5, 'rgba(190,188,180,.42)');
+      g.addColorStop(1, 'rgba(120,118,112,.55)');
+      c.fillStyle = g;
+      c.beginPath(); c.arc(x, y, 9.6 * s, 0, 7); c.fill();
+    } else if (f.shape === 'flood') {
+      const x = X(f.x), y = Y(f.y);
+      // a pipe to the ceiling, or a plate on the floor
+      c.strokeStyle = '#161615';
+      if (f.y < 0.5) {
+        c.lineWidth = 3 * s;
+        c.beginPath(); c.moveTo(x, 0); c.lineTo(x, y); c.stroke();
+      } else {
+        c.fillStyle = '#1b1b1a';
+        c.fillRect(x - 16 * s, y + 9 * s, 32 * s, 3 * s);
+        c.lineWidth = 3 * s;
+        c.beginPath(); c.moveTo(x, y); c.lineTo(x, y + 10 * s); c.stroke();
+      }
+      c.save();
+      c.translate(x, y);
+      c.rotate((f.angle * Math.PI) / 180);
+      const body = c.createLinearGradient(0, -13 * s, 0, 13 * s);
+      body.addColorStop(0, '#3e3e3b'); body.addColorStop(0.5, '#262624'); body.addColorStop(1, '#141413');
+      c.fillStyle = body;
+      c.fillRect(-13 * s, -11 * s, 18 * s, 22 * s);
+      c.fillStyle = '#0f0f0e'; // cooling fins
+      for (let k = 0; k < 5; k++) c.fillRect(-13 * s + k * 3.4 * s, -13 * s, 1.6 * s, 26 * s);
+      c.fillStyle = '#50504c'; // bezel
+      c.fillRect(5 * s, -13 * s, 3 * s, 26 * s);
+      c.fillStyle = '#6a6a65'; // yoke pivot
+      c.beginPath(); c.arc(-3 * s, 0, 2.4 * s, 0, 7); c.fill();
+      c.restore();
+    } else if (f.shape === 'screen') {
+      const hw = 0.11 * size * W2, hh = (hw * 9) / 16;
+      c.fillStyle = '#1a1a19';
+      c.fillRect(X(f.x) - hw - 1.4 * u, Y(f.y) - hh - 1.4 * u, 2 * hw + 2.8 * u, 2 * hh + 2.8 * u);
+      c.fillStyle = '#050505';
+      c.fillRect(X(f.x) - hw, Y(f.y) - hh, 2 * hw, 2 * hh);
+    }
+  });
+  gl.setFixtures(bodies);
+}
+
 // ------------------------------------------------------------------ drawing
 function draw() {
+  requestAnimationFrame(draw);
   const now = performance.now();
+  if (now < nextDraw - 3) return; // the light picture advances at 60 Hz on any display
+  nextDraw = Math.max(nextDraw + 1000 / 60, now);
   const dt = Math.min(100, now - lastT);
   lastT = now;
-  if (!S.show) return requestAnimationFrame(draw);
+  if (!S.show || !W || !H) return;
   stepPhysics(dt);
   const st = S.show.settings.stage;
   const fxs = S.show.fixtures;
   const u = unit();
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = '#05060a';
-  ctx.fillRect(0, 0, W, H);
 
-  // stage area
-  const { ox, oy, w, h } = rect;
-  ctx.save();
-  ctx.beginPath(); ctx.roundRect(ox, oy, w, h, 12); ctx.clip();
-  if (bgImg && bgImg.complete && bgImg.naturalWidth) {
-    ctx.drawImage(bgImg, ox, oy, w, h);
-    ctx.fillStyle = `rgba(4,5,9,${st.bg_dim ?? 0.55})`;
-    ctx.fillRect(ox, oy, w, h);
-  } else {
-    const g = ctx.createLinearGradient(0, oy, 0, oy + h);
-    g.addColorStop(0, '#0b0d15'); g.addColorStop(0.72, '#0d0f19'); g.addColorStop(1, '#141724');
-    ctx.fillStyle = g; ctx.fillRect(ox, oy, w, h);
-    // floor grid in perspective-ish lines
-    ctx.strokeStyle = 'rgba(140,150,200,.06)'; ctx.lineWidth = 1;
-    for (let i = 0; i <= 20; i++) { ctx.beginPath(); ctx.moveTo(ox + (i / 20) * w, oy); ctx.lineTo(ox + (i / 20) * w, oy + h); ctx.stroke(); }
-    for (let i = 0; i <= 11; i++) { ctx.beginPath(); ctx.moveTo(ox, oy + (i / 11) * h); ctx.lineTo(ox + w, oy + (i / 11) * h); ctx.stroke(); }
-  }
-
-  // haze: the room picks up the average colour of the lights
-  let sr = 0, sg = 0, sb = 0;
-  for (let j = 0; j < lay.P * 3; j += 3) { sr += disp[j]; sg += disp[j + 1]; sb += disp[j + 2]; }
-  const n = Math.max(1, lay.P);
-  const haze = (st.haze ?? 0.5) * 0.35;
-  if (haze > 0 && lay.P) {
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = `rgba(${sr / n | 0},${sg / n | 0},${sb / n | 0},${haze})`;
-    ctx.fillRect(ox, oy, w, h);
-  }
-
-  // bodies (unlit hardware)
-  ctx.globalCompositeOperation = 'source-over';
-  fxs.forEach((f, i) => drawBody(f, i, u));
-
-  // beams + glows
-  ctx.globalCompositeOperation = 'lighter';
-  fxs.forEach((f, i) => {
-    const a = lay.offsets[i];
-    if (f.shape === 'flood') drawBeam(f, disp[a * 3], disp[a * 3 + 1], disp[a * 3 + 2], u);
-    const r = glowRadius(f) * u;
-    const pts = lay.pos[i];
-    for (let k = 0; k < f.pixels; k++) {
-      const j = (a + k) * 3;
-      const R = disp[j], G = disp[j + 1], B = disp[j + 2];
-      const m = Math.max(R, G, B);
-      if (m < 3) continue;
-      ctx.globalAlpha = Math.min(1, m / 255);
-      const s = sprite(R, G, B);
-      const x = px(pts[k][0]), y = py(pts[k][1]);
-      ctx.drawImage(s, x - r, y - r, r * 2, r * 2);
+  if (gl?.gl) {
+    if (bodiesDirty) { paintBodies(); bodiesDirty = false; }
+    const outputs = wallOutputs().filter((o) => o.wall.tvs.length);
+    if (outputs.length) {
+      const rowH = 24;
+      if (spill.height !== rowH * outputs.length) spill.height = rowH * outputs.length;
+      outputs.forEach((o, n) => {
+        gl.setPicture(o.id, o.canvas);
+        spillCtx.drawImage(o.canvas, 0, (outputs.length - 1 - n) * rowH, spill.width, rowH);
+      });
+      gl.setSpill(spill);
     }
-  });
-  ctx.globalAlpha = 1;
-
-  // hot cores
-  ctx.globalCompositeOperation = 'source-over';
-  fxs.forEach((f, i) => {
-    const a = lay.offsets[i];
-    const pts = lay.pos[i];
-    const cr = coreRadius(f) * u;
-    for (let k = 0; k < f.pixels; k++) {
-      const j = (a + k) * 3;
-      const R = disp[j], G = disp[j + 1], B = disp[j + 2];
-      const m = Math.max(R, G, B) / 255;
-      if (m < 0.02) continue;
-      const wmix = m * 0.55; // bright LEDs blow out toward white
-      ctx.fillStyle = `rgba(${R + (255 - R) * wmix | 0},${G + (255 - G) * wmix | 0},${B + (255 - B) * wmix | 0},${Math.min(1, m * 1.4)})`;
-      ctx.beginPath(); ctx.arc(px(pts[k][0]), py(pts[k][1]), cr, 0, Math.PI * 2); ctx.fill();
-    }
-  });
-  ctx.restore();
+    gl.render(buildScene(outputs));
+  }
 
   // overlays
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
   fxs.forEach((f, i) => {
-    if (st.show_labels) drawLabel(f, i, u);
-    if (f.id === S.sel) drawSelection(f, i, u);
-    else if (hover && hover.id === f.id) drawHover(f, i, u);
+    const hovered = hover && hover.id === f.id;
+    const editing = canEdit();
+    if (st.show_labels || (editing && (hovered || f.id === S.sel))) drawLabel(f, i, u);
+    if (editing && f.id === S.sel) drawSelection(f, i, u);
+    else if (editing && hovered) drawHover(f, i, u);
   });
-  requestAnimationFrame(draw);
 }
 
-function glowRadius(f) {
-  return { flood: 70, bulb: 58, string: 30, line: 18 }[f.shape] * (f.size || 1);
-}
-function coreRadius(f) {
-  return { flood: 9, bulb: 8, string: 4.2, line: 2.6 }[f.shape] * (f.size || 1);
-}
-
-function drawBody(f, i, u) {
-  const pts = lay.pos[i];
-  ctx.lineCap = 'round';
-  if (f.shape === 'line') {
-    ctx.strokeStyle = '#1d2130'; ctx.lineWidth = 7 * u * (f.size || 1);
-    ctx.beginPath(); ctx.moveTo(px(f.x), py(f.y)); ctx.lineTo(px(f.x2), py(f.y2)); ctx.stroke();
-    ctx.fillStyle = '#2a2f44';
-    for (const p of pts) { ctx.beginPath(); ctx.arc(px(p[0]), py(p[1]), 1.6 * u, 0, 7); ctx.fill(); }
-  } else if (f.shape === 'string') {
-    ctx.strokeStyle = '#2a2d3a'; ctx.lineWidth = 1.5 * u;
-    ctx.beginPath();
-    for (let s = 0; s <= 30; s++) {
-      const t = s / 30;
-      const x = f.x + (f.x2 - f.x) * t, y = f.y + (f.y2 - f.y) * t + (f.sag || 0) * 4 * t * (1 - t);
-      s ? ctx.lineTo(px(x), py(y)) : ctx.moveTo(px(x), py(y));
-    }
-    ctx.stroke();
-    ctx.fillStyle = '#343849';
-    for (const p of pts) {
-      ctx.beginPath(); ctx.arc(px(p[0]), py(p[1]) + 3 * u, 4 * u * (f.size || 1), 0, 7); ctx.fill();
-      ctx.fillRect(px(p[0]) - 1.5 * u, py(p[1]) - 2 * u, 3 * u, 3 * u);
-    }
-  } else if (f.shape === 'bulb') {
-    const x = px(f.x), y = py(f.y), s = (f.size || 1) * u;
-    ctx.strokeStyle = '#2a2d3a'; ctx.lineWidth = 1.5 * u;
-    ctx.beginPath(); ctx.moveTo(x, rect.oy); ctx.lineTo(x, y - 12 * s); ctx.stroke(); // hanging cord
-    ctx.fillStyle = '#2b2f3f'; ctx.fillRect(x - 4 * s, y - 14 * s, 8 * s, 6 * s);
-    ctx.fillStyle = 'rgba(160,170,200,.12)'; ctx.strokeStyle = 'rgba(180,190,220,.25)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(x, y, 9 * s, 0, 7); ctx.fill(); ctx.stroke();
-  } else if (f.shape === 'flood') {
-    const x = px(f.x), y = py(f.y), s = (f.size || 1) * u;
-    ctx.save(); ctx.translate(x, y); ctx.rotate((f.angle * Math.PI) / 180);
-    ctx.fillStyle = '#23273a'; ctx.strokeStyle = '#3a3f58'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.roundRect(-12 * s, -13 * s, 18 * s, 26 * s, 3 * s); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#10121b'; ctx.fillRect(4 * s, -11 * s, 4 * s, 22 * s);
-    ctx.restore();
-  }
-}
-
-function drawBeam(f, R, G, B, u) {
-  const m = Math.max(R, G, B) / 255;
-  if (m < 0.01) return;
-  const x = px(f.x), y = py(f.y);
-  const a = (f.angle * Math.PI) / 180;
-  const len = 330 * u * (f.size || 1);
-  const spread = 0.42;
-  const ex = x + Math.cos(a) * len, ey = y + Math.sin(a) * len;
-  const g = ctx.createLinearGradient(x, y, ex, ey);
-  g.addColorStop(0, `rgba(${R | 0},${G | 0},${B | 0},${0.5 * m})`);
-  g.addColorStop(0.6, `rgba(${R | 0},${G | 0},${B | 0},${0.14 * m})`);
-  g.addColorStop(1, `rgba(${R | 0},${G | 0},${B | 0},0)`);
-  ctx.fillStyle = g;
-  ctx.beginPath();
-  ctx.moveTo(x + Math.cos(a + Math.PI / 2) * 8 * u, y + Math.sin(a + Math.PI / 2) * 8 * u);
-  ctx.lineTo(x + Math.cos(a + spread) * len, y + Math.sin(a + spread) * len);
-  ctx.lineTo(x + Math.cos(a - spread) * len, y + Math.sin(a - spread) * len);
-  ctx.lineTo(x + Math.cos(a - Math.PI / 2) * 8 * u, y + Math.sin(a - Math.PI / 2) * 8 * u);
-  ctx.closePath(); ctx.fill();
-  // pool of light where the beam lands
-  ctx.globalAlpha = 0.35 * m;
-  const s = sprite(R, G, B);
-  const pr = len * 0.45;
-  ctx.drawImage(s, ex - pr, ey - pr * 0.7, pr * 2, pr * 1.4);
-  ctx.globalAlpha = 1;
+/** A screen on the stage: 16:9, centred on (x, y), width set by size. */
+function screenRect(f) {
+  const sw = 0.22 * (f.size || 1) * rect.w;
+  const sh = (sw * 9) / 16;
+  return { x: px(f.x) - sw / 2, y: py(f.y) - sh / 2, w: sw, h: sh };
 }
 
 function drawLabel(f, i, u) {
   const x = px(f.x), y = py(f.y);
-  ctx.font = `500 ${Math.max(10, 11 * Math.min(1.2, u))}px "IBM Plex Sans", system-ui, sans-serif`;
-  ctx.fillStyle = 'rgba(220,225,245,.55)';
+  ctx.font = `400 ${Math.max(10, 11 * Math.min(1.2, u))}px "JetBrains Mono", ui-monospace, monospace`;
+  ctx.fillStyle = 'rgba(233,231,226,.75)';
   ctx.textAlign = 'center';
-  const ly = f.shape === 'flood' ? y + 24 * u : f.shape === 'bulb' ? y + 24 * u : y - 10 * u;
+  const ly = f.shape === 'screen' ? y + screenRect(f).h / 2 + 14 : f.shape === 'flood' ? y + 24 * u : f.shape === 'bulb' ? y + 24 * u : y - 10 * u;
   const lx = ['line', 'string'].includes(f.shape) ? (x + px(f.x2)) / 2 : x;
   ctx.fillText(f.name, lx, ly);
 }
 
 function handles(f, u) {
   const hs = [];
+  if (f.shape === 'screen') {
+    const r = screenRect(f);
+    hs.push({ mode: 'size', x: r.x + r.w, y: r.y + r.h });
+  }
   if (['line', 'string'].includes(f.shape)) {
     hs.push({ mode: 'p1', x: px(f.x), y: py(f.y) }, { mode: 'p2', x: px(f.x2), y: py(f.y2) });
     if (f.shape === 'string') hs.push({ mode: 'sag', x: (px(f.x) + px(f.x2)) / 2, y: (py(f.y) + py(f.y2)) / 2 + (f.sag || 0) * rect.h });
@@ -284,7 +373,10 @@ function handles(f, u) {
 
 function outline(f, i, u) {
   ctx.beginPath();
-  if (['line', 'string'].includes(f.shape)) {
+  if (f.shape === 'screen') {
+    const r = screenRect(f);
+    ctx.rect(r.x - 2, r.y - 2, r.w + 4, r.h + 4);
+  } else if (['line', 'string'].includes(f.shape)) {
     lay.pos[i].forEach((p, k) => (k ? ctx.lineTo(px(p[0]), py(p[1])) : ctx.moveTo(px(p[0]), py(p[1]))));
     if (f.pixels === 1) ctx.lineTo(px(f.x2), py(f.y2));
   } else {
@@ -292,15 +384,15 @@ function outline(f, i, u) {
   }
 }
 function drawSelection(f, i, u) {
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent-2').trim() || '#00e5ff';
+  const ink = '#ffffff';
   ctx.save();
-  ctx.strokeStyle = accent; ctx.lineWidth = ['line', 'string'].includes(f.shape) ? 14 * u : 2;
+  ctx.strokeStyle = ink; ctx.lineWidth = ['line', 'string'].includes(f.shape) ? 14 * u : 2;
   ctx.globalAlpha = ['line', 'string'].includes(f.shape) ? 0.25 : 0.9;
   ctx.setLineDash(['line', 'string'].includes(f.shape) ? [] : [4, 3]);
   outline(f, i, u); ctx.stroke();
   ctx.restore();
   for (const hd of handles(f, u)) {
-    ctx.fillStyle = '#0b0d14'; ctx.strokeStyle = accent; ctx.lineWidth = 2;
+    ctx.fillStyle = '#000'; ctx.strokeStyle = ink; ctx.lineWidth = 1.5;
     ctx.beginPath();
     if (hd.mode === 'rotate') { ctx.arc(hd.x, hd.y, 6, 0, 7); } else { ctx.rect(hd.x - 5, hd.y - 5, 10, 10); }
     ctx.fill(); ctx.stroke();
@@ -333,7 +425,10 @@ function hit(x, y) {
   const fxs = S.show.fixtures;
   for (let i = fxs.length - 1; i >= 0; i--) {
     const f = fxs[i];
-    if (['line', 'string'].includes(f.shape)) {
+    if (f.shape === 'screen') {
+      const r = screenRect(f);
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return { f, mode: 'move' };
+    } else if (['line', 'string'].includes(f.shape)) {
       const pts = lay.pos[i];
       if (pts.length === 1 && segDist(x, y, px(f.x), py(f.y), px(f.x2), py(f.y2)) < 10) return { f, mode: 'move' };
       for (let k = 1; k < pts.length; k++) {
@@ -349,18 +444,19 @@ function hit(x, y) {
 const pushMove = throttle((f) => send('fixture_update', { fixture: f, quiet: true }), 70);
 
 function onDown(e) {
-  if (!S.show) return;
+  if (!S.show || !canEdit()) return;
   cv.focus();
   const p = toNorm(e);
   const h = hit(p.x, p.y);
   if (!h) { if (S.sel) { S.sel = null; emit('select'); } return; }
-  if (S.sel !== h.f.id) { S.sel = h.f.id; S.selFromStage = true; emit('select'); }
+  if (S.sel !== h.f.id) { S.sel = h.f.id; emit('select'); }
   cv.setPointerCapture(e.pointerId);
   drag = { mode: h.mode, id: h.f.id, start: p, orig: { ...h.f } };
 }
 function onMove(e) {
   const p = toNorm(e);
   if (!drag) {
+    if (!canEdit()) { hover = null; cv.style.cursor = 'default'; return; }
     const h = S.show && hit(p.x, p.y);
     hover = h ? h.f : null;
     cv.style.cursor = h ? (h.mode === 'rotate' ? 'grab' : h.mode === 'move' ? 'move' : 'crosshair') : 'default';
@@ -376,6 +472,8 @@ function onMove(e) {
     const nx = cl(snap(o.x + dx)), ny = cl(snap(o.y + dy));
     f.x2 = cl(o.x2 + (nx - o.x)); f.y2 = cl(o.y2 + (ny - o.y));
     f.x = nx; f.y = ny;
+  } else if (drag.mode === 'size') {
+    f.size = clamp((2 * Math.abs(p.nx - f.x)) / 0.22, 0.4, 4);
   } else if (drag.mode === 'p1') { f.x = cl(snap(p.nx)); f.y = cl(snap(p.ny)); }
   else if (drag.mode === 'p2') { f.x2 = cl(snap(p.nx)); f.y2 = cl(snap(p.ny)); }
   else if (drag.mode === 'sag') { f.sag = clamp(p.ny - (f.y + f.y2) / 2, -0.3, 0.4); }
@@ -399,34 +497,27 @@ function onUp() {
 export function initStage() {
   cv = $('#stage');
   ctx = cv.getContext('2d');
+  glCanvas = $('#stage-gl');
+  gl = new StageRenderer(glCanvas);
   new ResizeObserver(resize).observe(cv.parentElement);
   cv.addEventListener('pointerdown', onDown);
   cv.addEventListener('pointermove', onMove);
   cv.addEventListener('pointerup', onUp);
   cv.addEventListener('pointercancel', onUp);
   cv.addEventListener('pointerleave', () => (hover = null));
-  cv.addEventListener('dblclick', () => S.sel && showTab('rig'));
-  $('#toggle-labels').onclick = () => {
-    const st = S.show.settings.stage;
-    send('settings', { patch: { stage: { ...st, show_labels: !st.show_labels } } });
-  };
-  $('#add-light').onclick = () => emit('add-light');
   const refresh = () => {
     rebuildLayout(); resize();
     const src = S.show?.settings.stage.background || '';
-    if (src !== bgSrc) { bgSrc = src; bgImg = src ? Object.assign(new Image(), { src }) : null; }
+    if (src !== bgSrc) {
+      bgSrc = src;
+      bgImg = src ? Object.assign(new Image(), { src, onload: () => { bodiesDirty = true; } }) : null;
+    }
+    bodiesDirty = true;
   };
   on('init', refresh);
   on('fixtures', () => { if (!drag) rebuildLayout(); });
   on('layout-local', rebuildLayout);
   on('settings', refresh);
   on('resize', resize);
-  on('status', (m) => {
-    const e = m.engine;
-    const name = (id) => S.show.scenes.find((s) => s.id === id)?.name || '';
-    $('#hud-scene').textContent = e.preview ? `Audition · ${name(e.preview)}` : name(e.current) || 'No scene';
-    $('#hud-next').textContent = e.queued ? `Next: ${name(e.queued.scene)} in ${Math.max(0, e.queued.at - e.beat).toFixed(1)} beats`
-      : e.transition ? `${Math.round(e.transition.progress * 100)}% → ${name(e.transition.to)}` : '';
-  });
   requestAnimationFrame(draw);
 }

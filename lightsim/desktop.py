@@ -76,9 +76,62 @@ def port_free(host: str, port: int) -> bool:
 class Api:
     """Functions the page can call as window.pywebview.api.* (native dialogs)."""
 
-    def __init__(self, show):
+    def __init__(self, show, url=""):
         self._show = show
         self._window = None
+        self._url = url
+        self._tvs = []
+
+    def open_tv(self, pictures=None):
+        """Open a window for each picture. Press again to close them.
+
+        A group of TVs on one computer gets one window stretched across that many spare
+        displays, so it's a single picture. With too few displays it opens as a normal window.
+        """
+        import webview
+        if self._tvs:
+            self.close_tv()
+            return False
+        pictures = pictures or [{"query": "", "tvs": 1, "aspect": 16 / 9}]
+        spare = sorted(list(webview.screens)[1:], key=lambda s: (s.x, s.y))
+        for pic in pictures:
+            n = max(1, int(pic.get("tvs", 1)))
+            url = f"{self._url}/tv" + (f"?{pic['query']}" if pic.get("query") else "")
+            place = {"width": 1280, "height": max(240, round(1280 / float(pic.get("aspect") or 16 / 9)))}
+            if len(spare) >= n:
+                use, spare = spare[:n], spare[n:]
+                if n == 1:
+                    place = {"screen": use[0], "fullscreen": True}
+                else:
+                    x, y = min(s.x for s in use), min(s.y for s in use)
+                    place = {"x": x, "y": y, "frameless": True, "on_top": True,
+                             "width": max(s.x + s.width for s in use) - x,
+                             "height": max(s.y + s.height for s in use) - y}
+            win = webview.create_window("LightingSim TV", url, background_color="#000000", js_api=self, **place)
+            if place.get("frameless"):
+                # removing the title bar shrinks the window, so set its real size once it exists
+                win.events.loaded += lambda w=win, p=place: (w.move(p["x"], p["y"]), w.resize(p["width"], p["height"]))
+            win.events.closed += lambda w=win: self._tv_closed(w)
+            self._tvs.append(win)
+        return True
+
+    def _tv_closed(self, win):
+        if win in self._tvs:
+            self._tvs.remove(win)
+
+    def close_tv(self):
+        for win in list(self._tvs):
+            try:
+                win.destroy()
+            except Exception:
+                pass
+        self._tvs = []
+
+    def toggle_fullscreen(self):
+        import webview
+        win = webview.active_window()
+        if win is not None and win in self._tvs:
+            win.toggle_fullscreen()
 
     def export_show(self):
         import webview
@@ -161,12 +214,13 @@ def run_desktop(show, port: int, lan: bool, data_dir: Path) -> bool:
             return False
         url = f"http://127.0.0.1:{port}"
 
-    api = Api(show)
+    api = Api(show, url)
     window = webview.create_window(
         f"LightingSim {__version__}", url, js_api=api,
-        width=1440, height=900, min_size=(960, 620), background_color="#0b0d14",
+        width=1440, height=900, min_size=(960, 620), background_color="#0d0d0c",
     )
     api._window = window
+    window.events.closed += api.close_tv  # the app quits with its main window
     if server:
         server.app["core"].on_quit = window.destroy  # the in-app Quit button closes the window
 

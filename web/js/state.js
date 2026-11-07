@@ -2,7 +2,7 @@
 export const S = {
   show: null, profiles: {}, palettes: [], divs: [], transitions: [], quantize: [],
   status: null, sel: null, editScene: null, lanUrls: [], serialPorts: [], midiInputs: [],
-  frame: null, beat: 0, beatT: 0, bpm: 120, speed: 1, connected: false,
+  frame: null, beat: 0, beatT: 0, bpm: 120, speed: 1, connected: false, tab: 'play',
 };
 
 let ws = null;

@@ -7,14 +7,16 @@ from __future__ import annotations
 
 from .fixtures import make_fixture, new_id
 
+SHOW_VERSION = 2
+
 PALETTES = [
-    {"name": "Neon", "colors": ["#ff2d95", "#00e5ff", "#7c4dff", "#ffffff"]},
-    {"name": "Sunset", "colors": ["#ff6b2d", "#ff2d55", "#ffc53d", "#8a2be2"]},
-    {"name": "Ice", "colors": ["#00b7ff", "#e6f7ff", "#3d5afe", "#9ffcff"]},
+    {"name": "Dusk", "colors": ["#3f4f9f", "#8f62b8", "#e58bb8", "#ffe1ea"]},
+    {"name": "Hill", "colors": ["#2b76c7", "#ff7a4a", "#79adff", "#ffe6d8"]},
+    {"name": "Koi", "colors": ["#e8571e", "#f3a23a", "#c9281c", "#f1ede4"]},
+    {"name": "Wing", "colors": ["#2f6fd6", "#7fb6ff", "#bfe0ff", "#ffffff"]},
+    {"name": "Grain", "colors": ["#5a4fb8", "#8f86df", "#c9c3f2", "#ffffff"]},
+    {"name": "Thermal", "colors": ["#2ec4d6", "#f4d35e", "#f2542d", "#ffffff"]},
     {"name": "Acid", "colors": ["#b6ff00", "#00ffa3", "#ff00e6", "#fff200"]},
-    {"name": "Ember", "colors": ["#ff3d00", "#ffb300", "#ff1744", "#ffe0b2"]},
-    {"name": "Miami", "colors": ["#ff4fd8", "#2de2e6", "#f9c80e", "#fd3777"]},
-    {"name": "Forest", "colors": ["#00c853", "#aeea00", "#00bfa5", "#fff59d"]},
     {"name": "Mono", "colors": ["#ffffff", "#c8d2ff", "#ffe6c8", "#ffffff"]},
 ]
 
@@ -40,9 +42,32 @@ def solid(*c):
     return {"type": "solid", "colors": list(c) or ["p0"]}
 
 
+# Which visual each built-in scene plays on the TV.
+SCENE_VISUALS = {
+    "Warm Glow": {"id": "smoke"},
+    "Four on the Floor": {"id": "ridges"},
+    "Offbeat Hats": {"id": "tunnel"},
+    "Alternating Strobe": {"id": "bars"},
+    "Rainbow Sweep": {"id": "currents", "color": "thermal"},
+    "Left-Right Chase": {"id": "ribbons"},
+    "Center Burst": {"id": "shock"},
+    "Build-Up (8 bars)": {"id": "warp"},
+    "Drop": {"id": "cutup"},
+    "Sparkle Night": {"id": "contours"},
+    "Split Colors": {"id": "blocks"},
+    "Ocean Breakdown": {"id": "ink"},
+    "Snare 2 & 4": {"id": "tear"},
+    "Triplet Chase": {"id": "moire"},
+    "32nd Roll": {"id": "static"},
+    "Palette Cycle": {"id": "bloom"},
+    "Full White": {"id": "none"},
+    "Dark": {"id": "none"},
+}
+
+
 def scene(name, bars, color, tracks, utility=False):
     return {"id": new_id("sc"), "name": name, "bars": bars, "color": color, "tracks": tracks,
-            "utility": utility, "builtin": True}
+            "utility": utility, "builtin": True, "visual": dict(SCENE_VISUALS.get(name, {"id": "currents"}))}
 
 
 def default_scenes() -> list[dict]:
@@ -132,17 +157,21 @@ def default_scenes() -> list[dict]:
     ]
 
 
+def make_tv() -> dict:
+    return make_fixture("tv", 0.5, 0.29, name="TV")
+
+
 def demo_rig() -> list[dict]:
-    fx = []
+    fx = [make_tv()]
     fx.append(make_fixture("flood_dmx", 0.07, 0.16, name="Flood TL", angle=50))
     fx.append(make_fixture("flood_dmx", 0.93, 0.16, name="Flood TR", angle=130))
     fx.append(make_fixture("strobe_dmx", 0.33, 0.93, name="Strobe L", angle=-90))
     fx.append(make_fixture("strobe_dmx", 0.67, 0.93, name="Strobe R", angle=-90))
     # DMX addresses: 5ch floods at 1 and 6, 1ch strobes at 11 and 12
-    fx[0]["patch"]["address"] = 1
-    fx[1]["patch"]["address"] = 6
-    fx[2]["patch"]["address"] = 11
-    fx[3]["patch"]["address"] = 12
+    fx[1]["patch"]["address"] = 1
+    fx[2]["patch"]["address"] = 6
+    fx[3]["patch"]["address"] = 11
+    fx[4]["patch"]["address"] = 12
     fx.append(make_fixture("govee_string", 0.04, 0.07, name="Govee String L", x2=0.5, y2=0.09, sag=0.09))
     fx.append(make_fixture("govee_string", 0.5, 0.09, name="Govee String R", x2=0.96, y2=0.07, sag=0.09))
     fx.append(make_fixture("strip_wled", 0.12, 0.8, name="Strip L", x2=0.48, y2=0.8))
@@ -175,15 +204,16 @@ def default_settings() -> dict:
         "dmx_interfaces": [{"id": "dmx1", "type": "none", "port": "", "host": "", "universe": 0}],
         "lan_access": False,
         "auto_update_check": True,
-        "theme": "neon",
-        "stage": {"aspect": 1.7778, "background": "", "bg_dim": 0.55, "haze": 0.5, "show_labels": True},
+        "theme": "dark",
+        "stage": {"aspect": 1.7778, "background": "", "room": 0.1, "haze": 0.5, "show_labels": False},
+        "tv": {"hold": False, "held": None, "energy": 0.5},
     }
 
 
 def default_show() -> dict:
     scenes = default_scenes()
     return {
-        "version": 1,
+        "version": SHOW_VERSION,
         "name": "My Rig",
         "fixtures": demo_rig(),
         "scenes": scenes,

@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import APP_NAME
 from .fixtures import normalize_fixture
-from .presets import default_settings, default_show
+from .presets import PALETTES, SCENE_VISUALS, SHOW_VERSION, default_settings, default_show, make_tv
 
 log = logging.getLogger("lightsim.show")
 
@@ -62,7 +62,22 @@ class Show:
         ids = {s["id"] for s in out["scenes"]}
         out["bank"] = [i for i in out.get("bank", []) if i in ids] + [
             s["id"] for s in out["scenes"] if s["id"] not in out.get("bank", [])]
+        if d.get("version", 1) < 2:
+            Show._migrate_v2(out)
+        out["version"] = SHOW_VERSION
         return out
+
+    @staticmethod
+    def _migrate_v2(d: dict):
+        """Version 2 adds a TV: one on stage, and a visual for every scene."""
+        d["fixtures"].insert(0, make_tv())
+        for s in d["scenes"]:
+            s.setdefault("visual", dict(SCENE_VISUALS.get(s.get("name"), {"id": "currents"})))
+        if d["palette"].get("name") == "Neon":  # the old default, which is no longer offered
+            d["palette"] = {"name": PALETTES[0]["name"], "colors": list(PALETTES[0]["colors"])}
+        st = d["settings"]
+        st["theme"] = "light" if st.get("theme") == "daylight" else "dark"
+        st["stage"]["show_labels"] = False
 
     def mark_dirty(self):
         self._dirty_at = time.time()

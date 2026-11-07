@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>LightingSim TV</title>
+<link rel="icon" href="data:,">
+<link rel="preload" href="/static/fonts/jetbrains-mono-500.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+  @font-face { font-family: "JetBrains Mono"; src: url(/static/fonts/jetbrains-mono-500.woff2) format("woff2"); font-weight: 500; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  body { display: grid; place-items: center; }
+  canvas { display: block; }
+  body.idle { cursor: none; }
+</style>
+</head>
+<body>
+<canvas id="screen"></canvas>
+<script type="module" src="/static/js/tv-page.js"></script>
+</body>
+</html>

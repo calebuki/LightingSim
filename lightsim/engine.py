@@ -128,12 +128,16 @@ class Layout:
         self.fx_y = np.array([fx["y"] for fx in fixtures], dtype=np.float64)
 
     def targets(self, target: list[str]) -> np.ndarray:
-        """Fixture indices a track addresses, ordered left->right, top->bottom."""
+        """Fixture indices a track addresses, ordered left->right, top->bottom.
+
+        Screens have no pixels and play visuals instead, so tracks never address them.
+        """
+        lights = [i for i, fx in enumerate(self.fixtures) if fx["shape"] != "screen"]
         if not target or "all" in target:
-            idx = list(range(self.F))
+            idx = lights
         else:
             tset = set(target)
-            idx = [i for i, fx in enumerate(self.fixtures) if fx["group"] in tset or fx["id"] in tset]
+            idx = [i for i in lights if self.fixtures[i]["group"] in tset or self.fixtures[i]["id"] in tset]
         idx.sort(key=lambda i: (round(self.fx_x[i], 3), self.fx_y[i]))
         return np.array(idx, dtype=np.int64)
 
@@ -407,9 +411,11 @@ class Engine:
         self._blackout_level = 0.0
         self.flash = 0.0
         self.strobe = False
-        self.group_levels = {"floods": 1.0, "strips": 1.0, "strings": 1.0, "bulbs": 1.0}
+        self.group_levels = {"floods": 1.0, "strips": 1.0, "strings": 1.0, "bulbs": 1.0, "screens": 1.0}
         self.identify: dict[int, float] = {}
         self.preview_scene: str | None = None  # editor audition (sim only override)
+        self.tv_phase = 0.0  # how far the energy fader has pushed visuals, shared by every screen
+        self._tv_beat = None
         self._last_phrase = None
         self._auto_order: list[str] = []
         self._strobe_ct: CompiledTrack | None = None
@@ -553,7 +559,22 @@ class Engine:
             speed = self.clock.speed
             b = self.clock.beat(t)
             beat_ms = 60000.0 / max(1.0, bpm * speed)
-            if lay.P == 0:
+
+            if self._tv_beat is not None and 0 < b - self._tv_beat < 1:
+                self.tv_phase += (float(st.get("tv", {}).get("energy", 0.5)) - 0.5) * (b - self._tv_beat)
+            self._tv_beat = b
+
+            # launch when due - or right away if the clock jumped backwards
+            # (a Link peer joining/leaving can re-seat the shared timeline)
+            if self.queued and (b >= self.queued["at"] or self.queued["at"] - b > 33):
+                self._start_transition(self.queued, b)
+            if self.transition and b < self.transition["start"] - 0.5:
+                self.transition["start"] = b
+            self._autopilot(b)
+
+            if lay.P == 0:  # a rig with only a TV still follows scenes
+                if self.transition and (b - self.transition["start"]) / self.transition["beats"] >= 1.0:
+                    self.transition = None
                 return b"", np.zeros(0, bool)
 
             flash_cap = float(st.get("max_flash_hz", 0) or 0)
@@ -563,14 +584,6 @@ class Engine:
             look = lay.latency / beat_ms if live else np.zeros(lay.F)
             bF = b + look
             bP = bF[lay.fid]
-
-            # launch when due - or right away if the clock jumped backwards
-            # (a Link peer joining/leaving can re-seat the shared timeline)
-            if self.queued and (b >= self.queued["at"] or self.queued["at"] - b > 33):
-                self._start_transition(self.queued, b)
-            if self.transition and b < self.transition["start"] - 0.5:
-                self.transition["start"] = b
-            self._autopilot(b)
 
             scene_id = self.preview_scene or self.current
             out = self._render_scene(self.compiled(scene_id), bF, bP, beat_ms, min_pulse, palette)
@@ -636,12 +649,15 @@ class Engine:
         return {
             "beat": b,
             "current": self.current,
-            "queued": self.queued and {"scene": self.queued["scene"], "at": self.queued["at"]},
-            "transition": tr and {"from": tr["from"], "to": tr["to"],
+            "queued": self.queued and {"scene": self.queued["scene"], "at": self.queued["at"], "tr": self.queued["tr"]},
+            "transition": tr and {"from": tr["from"], "to": tr["to"], "type": tr["type"],
+                                  "start": tr["start"], "beats": tr["beats"],
                                   "progress": max(0.0, min(1.0, (b - tr["start"]) / tr["beats"]))},
             "master": self.master,
             "blackout": self.blackout,
             "strobe": self.strobe,
+            "flash": self.flash,
+            "tv_phase": self.tv_phase,
             "group_levels": self.group_levels,
             "preview": self.preview_scene,
             "render_ms": round(self.stats["render_ms"], 2),

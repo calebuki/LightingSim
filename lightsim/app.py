@@ -160,6 +160,9 @@ class App:
     async def index(self, request):
         return web.FileResponse(web_root() / "index.html", headers={"Cache-Control": "no-cache"})
 
+    async def tv_page(self, request):
+        return web.FileResponse(web_root() / "tv.html", headers={"Cache-Control": "no-cache"})
+
     async def export_show(self, request):
         body = json.dumps(self.show.export(), indent=1)
         name = self.show.data.get("name", "show").replace(" ", "_")
@@ -255,6 +258,9 @@ class App:
                 fx["patch"].update(m["patch"])
             if m.get("name"):
                 fx["name"] = m["name"]
+            for k in ("size", "wall"):
+                if k in m:
+                    fx[k] = m[k]
             d["fixtures"].append(fx)
             self._layout_changed()
             await self.broadcast({"type": "fixtures", "fixtures": d["fixtures"], "layout_version": eng.layout_version,
@@ -451,6 +457,12 @@ class App:
             if bank:
                 i = bank.index(eng.current) if eng.current in bank else -1
                 eng.launch(bank[(i + (1 if target == "next" else -1)) % len(bank)])
+        elif target == "tv_energy":
+            st["tv"]["energy"] = value
+            asyncio.ensure_future(self.broadcast({"type": "settings", "settings": st}))
+        elif target == "tv_hold" and pressed:
+            st["tv"]["hold"] = not st["tv"].get("hold")
+            asyncio.ensure_future(self.broadcast({"type": "settings", "settings": st}))
         elif target == "autopilot" and pressed:
             ap = st["autopilot"]
             ap["enabled"] = not ap.get("enabled")
@@ -475,6 +487,7 @@ def build_app(show: Show, port: int, lan: bool) -> web.Application:
     app.on_startup.append(core.start)
     app.on_shutdown.append(core.stop)
     app.router.add_get("/", core.index)
+    app.router.add_get("/tv", core.tv_page)
     app.router.add_get("/ws", core.ws_handler)
     app.router.add_get("/api/export", core.export_show)
     app.router.add_post("/api/quit", core.quit)

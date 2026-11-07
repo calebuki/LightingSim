@@ -1,4 +1,5 @@
 // Small helpers shared by every panel.
+import { S } from './state.js';
 
 /** h('div.cls#id', {attrs/on*}, ...children) */
 export function h(tag, props, ...kids) {
@@ -36,12 +37,6 @@ export const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export const clone = (o) => JSON.parse(JSON.stringify(o));
 export const uid = (p = 'id') => `${p}_${Math.random().toString(16).slice(2, 10)}`;
 
-export function hexToRgb(hex) {
-  let s = (hex || '#000').replace('#', '');
-  if (s.length === 3) s = s.split('').map((c) => c + c).join('');
-  const n = parseInt(s, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-}
 export function colorOf(c, palette) {
   if (typeof c === 'string' && /^p\d$/.test(c)) return palette[+c[1] % palette.length] || '#ffffff';
   if (c === 'white') return '#ffffff';
@@ -65,7 +60,7 @@ export function debounce(fn, ms) {
 export function toast(msg, err = false) {
   const el = h('div.toast', { class: err ? 'err' : '' }, msg);
   document.getElementById('toasts').append(el);
-  setTimeout(() => el.remove(), err ? 5000 : 2600);
+  setTimeout(() => el.remove(), err ? 5000 : 2400);
 }
 
 // tiny event bus
@@ -73,8 +68,8 @@ const subs = {};
 export const on = (ev, fn) => ((subs[ev] ||= []).push(fn), fn);
 export const emit = (ev, ...a) => (subs[ev] || []).forEach((f) => f(...a));
 
-export const DIV_LABEL = { 1: '1 beat', 2: '1/2', 3: '1/3 trip', 4: '1/4', 6: '1/6 trip', 8: '1/8', 12: '1/12 trip', 16: '1/16', 32: '1/32' };
-export const RATE_OPTS = [[0.25, '1/4 beat'], [0.5, '1/2 beat'], [1, '1 beat'], [1.3333, '4/3 (trip)'], [2, '2 beats'], [4, '1 bar'], [8, '2 bars'], [16, '4 bars'], [32, '8 bars']];
+export const DIV_LABEL = { 1: '1 beat', 2: '1/2', 3: '1/3', 4: '1/4', 6: '1/6', 8: '1/8', 12: '1/12', 16: '1/16', 32: '1/32' };
+export const RATE_OPTS = [[0.25, '1/4 beat'], [0.5, '1/2 beat'], [1, '1 beat'], [1.3333, '4/3 beat'], [2, '2 beats'], [4, '1 bar'], [8, '2 bars'], [16, '4 bars'], [32, '8 bars']];
 
 export function field(label, control, cls = '') {
   return h('label.field', { class: cls }, h('span', label), control);
@@ -95,8 +90,11 @@ export function num(value, onchange, attrs = {}) {
 }
 
 export function showTab(name) {
-  $$('.tabs [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+  S.tab = name;
+  const app = $('#app');
+  if (app) app.dataset.tab = name;
+  $$('#nav [data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === name));
   $$('.panel').forEach((p) => (p.hidden = p.id !== `tab-${name}`));
-  try { localStorage.setItem('ls.tab', name); } catch {}
+  try { localStorage.setItem('ls.tab2', name); } catch {}
   emit('tab', name);
 }

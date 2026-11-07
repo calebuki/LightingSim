@@ -93,7 +93,7 @@ class LinkSource:
         return {
             "ok": peers > 0,
             "peers": peers,
-            "detail": f"{peers} Link peer{'s' if peers != 1 else ''}" if peers else "Waiting for rekordbox (turn on LINK)",
+            "detail": f"{peers} Link peer{'s' if peers != 1 else ''}" if peers else "Waiting. In rekordbox: Performance mode, then LINK.",
         }
 
 

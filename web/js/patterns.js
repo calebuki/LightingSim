@@ -1,24 +1,25 @@
 // Pattern editor: scenes -> tracks -> (effect x step gate), with live playhead
 // and warnings when a light can't physically keep up with the subdivision.
 import { S, send, beatNow, scene } from './state.js';
-import { $, $$, DIV_LABEL, RATE_OPTS, clamp, clone, colorOf, debounce, field, h, on, select, toast, uid } from './util.js';
+import { $, DIV_LABEL, RATE_OPTS, clamp, clone, colorOf, debounce, field, h, on, select, uid } from './util.js';
+import { VISUALS, resolveVisual } from './visuals/library.js';
 
 const GROUPS = ['floods', 'strips', 'strings', 'bulbs'];
-const ENV = [['hold', 'Hold (steady)'], ['gate', 'Gate (hard on/off)'], ['decay', 'Flash + decay'], ['swell', 'Swell up'], ['smooth', 'Smooth glide'], ['sine', 'Pulse (sine)']];
-const SPREAD = [['all', 'All together'], ['alternate', 'Alternate odd/even'], ['chase', 'Chase L→R'], ['bounce', 'Bounce chase'], ['fill', 'Fill up'], ['random', 'Random light'], ['odd', 'Odd lights only'], ['even', 'Even lights only']];
-const FALLBACK = [['pulse', 'Pulse slower'], ['hold', 'Steady glow'], ['skip', 'Stay dark']];
-const BLEND = [['max', 'Brightest wins'], ['add', 'Add'], ['over', 'Cover'], ['mask', 'Mask (cut out)']];
-const AXIS = [['x', 'Left → right'], ['y', 'Top → bottom'], ['diag', 'Diagonal'], ['radial', 'Centre → out'], ['angle', 'Around centre'], ['rank', 'Light order'], ['u', 'Along each light']];
+const ENV = [['hold', 'Hold'], ['gate', 'Gate'], ['decay', 'Decay'], ['swell', 'Swell'], ['smooth', 'Glide'], ['sine', 'Pulse']];
+const SPREAD = [['all', 'Together'], ['alternate', 'Alternate'], ['chase', 'Chase'], ['bounce', 'Bounce'], ['fill', 'Fill'], ['random', 'Random'], ['odd', 'Odd'], ['even', 'Even']];
+const FALLBACK = [['pulse', 'Slower'], ['hold', 'Steady'], ['skip', 'Dark']];
+const BLEND = [['max', 'Brightest'], ['add', 'Add'], ['over', 'Cover'], ['mask', 'Mask']];
+const AXIS = [['x', 'Across'], ['y', 'Down'], ['diag', 'Diagonal'], ['radial', 'Outward'], ['angle', 'Around'], ['rank', 'Light order'], ['u', 'Along light']];
 const FX = {
-  solid: { label: 'Solid colour', colors: [1, 1], params: [] },
-  cycle: { label: 'Colour cycle', colors: [2, 6], params: ['rate', 'fade', 'axis', 'spread'] },
-  sweep: { label: 'Sweep / chase band', colors: [1, 2], params: ['rate', 'width', 'axis', 'bounce', 'reverse', 'bg'] },
+  solid: { label: 'Solid', colors: [1, 1], params: [] },
+  cycle: { label: 'Cycle', colors: [2, 6], params: ['rate', 'fade', 'axis', 'spread'] },
+  sweep: { label: 'Sweep', colors: [1, 2], params: ['rate', 'width', 'axis', 'bounce', 'reverse', 'bg'] },
   wave: { label: 'Wave', colors: [1, 2], params: ['rate', 'cycles', 'depth', 'axis', 'reverse'] },
   rainbow: { label: 'Rainbow', colors: [0, 0], params: ['rate', 'cycles', 'sat', 'axis', 'reverse'] },
   gradient: { label: 'Gradient', colors: [2, 6], params: ['rate', 'cycles', 'axis', 'scroll'] },
   sparkle: { label: 'Sparkle', colors: [1, 6], params: ['rate', 'density'] },
-  split: { label: 'Split colours', colors: [2, 6], params: ['rate', 'segments'] },
-  flicker: { label: 'Flicker / candle', colors: [1, 2], params: ['depth'] },
+  split: { label: 'Split', colors: [2, 6], params: ['rate', 'segments'] },
+  flicker: { label: 'Flicker', colors: [1, 2], params: ['depth'] },
 };
 const PARAM = {
   rate: { label: 'Speed', kind: 'rate', def: 4 },
@@ -26,12 +27,12 @@ const PARAM = {
   width: { label: 'Width', kind: 'unit', def: 0.25 },
   depth: { label: 'Depth', kind: 'unit', def: 0.6 },
   density: { label: 'Density', kind: 'unit', def: 0.15 },
-  bg: { label: 'Background', kind: 'unit', def: 0 },
-  sat: { label: 'Saturation', kind: 'unit', def: 1 },
+  bg: { label: 'Back', kind: 'unit', def: 0 },
+  sat: { label: 'Sat', kind: 'unit', def: 1 },
   cycles: { label: 'Repeats', kind: 'num', def: 1, step: 0.25, min: 0, max: 8 },
   spread: { label: 'Travel', kind: 'num', def: 0, step: 0.1, min: 0, max: 4 },
   segments: { label: 'Segments', kind: 'num', def: 0, step: 1, min: 0, max: 32 },
-  axis: { label: 'Direction', kind: 'axis', def: 'x' },
+  axis: { label: 'Axis', kind: 'axis', def: 'x' },
   bounce: { label: 'Bounce', kind: 'bool', def: false },
   reverse: { label: 'Reverse', kind: 'bool', def: false },
   scroll: { label: 'Scroll', kind: 'bool', def: true },
@@ -43,7 +44,7 @@ const grids = []; // {grid, cells, t, last} for the playhead
 const sendScene = debounce(() => ed && send('scene_update', { scene: ed }), 90);
 
 export function initPatterns() {
-  root = $('#tab-patterns');
+  root = $('#tab-scenes');
   on('init', loadEditor);
   on('scenes', (id) => {
     // another client (e.g. a phone) edited this scene, or it was added/deleted: reload
@@ -51,6 +52,7 @@ export function initPatterns() {
     else renderHead();
   });
   on('palette', () => ed && renderEditor());
+  on('tab', (t) => t === 'scenes' && loadEditor());
   on('fixtures', () => ed && renderWarnings());
   on('status', () => ed && renderWarningsThrottled());
   (function loop() { playhead(); requestAnimationFrame(loop); })();
@@ -66,6 +68,7 @@ function commit(rerender = false) {
 function newScene() {
   send('scene_add', { scene: {
     name: 'New scene', bars: 1, color: S.show.palette.colors[0], utility: false,
+    visual: { id: 'currents' },
     tracks: [newTrack()],
   } });
 }
@@ -88,16 +91,14 @@ function renderEditor() {
   if (!root) return;
   grids.length = 0;
   if (!ed) {
-    root.replaceChildren(h('div.pat', h('div.pat-head', h('button.btn.sm.primary', { onclick: newScene }, '+ New scene'),
-      h('span.muted', 'No scenes yet.'))));
+    root.replaceChildren(h('div.pat', h('div.pat-head', h('button', { onclick: newScene }, 'New scene'))));
     return;
   }
   const t = ed.tracks.find((x) => x.id === selTrack);
   root.replaceChildren(h('div.pat',
     h('div.pat-head#pat-head'),
     h('div.trows', ed.tracks.map((tr, i) => trackRow(tr, i)),
-      h('div.row', { style: { paddingLeft: '6px' } },
-        h('button.btn.xs', { onclick: () => { const nt = newTrack(); ed.tracks.push(nt); selTrack = nt.id; commit(true); } }, '+ Add track'))),
+      h('button.add-track', { onclick: () => { const nt = newTrack(); ed.tracks.push(nt); selTrack = nt.id; commit(true); } }, 'Add track')),
     t ? trackPanel(t, ed.tracks.indexOf(t)) : null));
   renderHead();
   renderWarnings();
@@ -107,34 +108,35 @@ function renderHead() {
   const box = $('#pat-head', root);
   if (!box || !ed) return;
   const previewing = S.status?.engine.preview === ed.id;
-  const opts = S.show.bank.map((id) => scene(id)).filter(Boolean).map((s) => [s.id, `${s.name}  (${s.bars} bar${s.bars > 1 ? 's' : ''})`]);
+  const opts = S.show.bank.map((id) => scene(id)).filter(Boolean).map((s) => [s.id, s.name]);
+  const vis = resolveVisual(ed.visual);
   box.replaceChildren(
-    select(opts, ed.id, (v) => { S.editScene = v; selTrack = null; loadEditor(); }, { class: 'scene-pick', 'aria-label': 'Scene to edit' }),
-    h('input.name#sc-name', { type: 'text', value: ed.name, 'aria-label': 'Scene name', oninput: (e) => { ed.name = e.target.value; commit(); } }),
-    h('input#sc-color', { type: 'color', value: ed.color || '#ff2d95', title: 'Pad colour', onchange: (e) => { ed.color = e.target.value; commit(); } }),
-    select([[1, 'Loop 1 bar'], [2, 'Loop 2 bars'], [4, 'Loop 4 bars'], [8, 'Loop 8 bars']], ed.bars, (v) => {
+    select(opts, ed.id, (v) => { S.editScene = v; selTrack = null; loadEditor(); }, { class: 'scene-pick', 'aria-label': 'Scene' }),
+    h('input.name#sc-name', { type: 'text', value: ed.name, 'aria-label': 'Name', oninput: (e) => { ed.name = e.target.value; commit(); } }),
+    select([[1, '1 bar'], [2, '2 bars'], [4, '4 bars'], [8, '8 bars']], ed.bars, (v) => {
       ed.bars = parseInt(v);
       ed.tracks.forEach((x) => { if (x.gate.bars > ed.bars) resample(x, x.gate.div, ed.bars); });
       commit(true);
-    }, { id: 'sc-bars', 'aria-label': 'Loop length', style: 'height:30px' }),
-    h('label.check', { title: 'Utility pads (like Full White) are skipped by autopilot' },
-      h('input#sc-utility', { type: 'checkbox', checked: !!ed.utility, onchange: (e) => { ed.utility = e.target.checked; commit(); } }), 'Utility'),
+    }, { id: 'sc-bars', 'aria-label': 'Loop length' }),
+    h('label.field-inline', 'TV',
+      select([['none', 'Black'], ...VISUALS.map((v) => [v.id, v.name])], vis.id, (v) => { ed.visual = { ...ed.visual, id: v }; commit(); }, { id: 'sc-visual', 'aria-label': 'TV visual' })),
+    h('label.check', { title: 'Autopilot skips this scene' },
+      h('input#sc-utility', { type: 'checkbox', checked: !!ed.utility, onchange: (e) => { ed.utility = e.target.checked; commit(); } }), 'Skip in auto'),
     h('span.grow'),
-    h('button.btn.sm', { class: previewing ? 'on' : '', title: 'Play this scene on the rig while editing (overrides the live scene)',
+    h('button', { class: previewing ? 'on' : '', title: 'Play this scene while editing',
       onclick: (e) => { const on = S.status?.engine.preview !== ed.id; send('preview', { scene: on ? ed.id : null }); e.target.classList.toggle('on', on); } }, 'Audition'),
-    h('button.btn.sm', { onclick: () => send('launch', { scene: ed.id }) }, 'Launch'),
-    h('button.btn.sm', { onclick: newScene }, '+ New'),
-    h('button.btn.sm', { onclick: () => send('scene_add', { scene: { ...clone(ed), name: ed.name + ' copy' } }) }, 'Duplicate'),
-    h('button.btn.sm', { onclick: (e) => confirmDelete(e.target) }, 'Delete'),
-    h('button.btn.sm.ghost', { onclick: () => send('restore_presets'), title: 'Bring back any built-in presets you deleted' }, 'Restore presets'));
+    h('button', { onclick: () => send('launch', { scene: ed.id }) }, 'Launch'),
+    h('button', { onclick: newScene }, 'New'),
+    h('button', { onclick: () => send('scene_add', { scene: { ...clone(ed), name: ed.name + ' copy' } }) }, 'Copy'),
+    h('button', { onclick: (e) => confirmDelete(e.target) }, 'Delete'));
 }
 
 function confirmDelete(btn) {
   if (btn.dataset.armed) { send('scene_delete', { id: ed.id }); return; }
   btn.dataset.armed = '1';
-  btn.textContent = 'Really delete?';
-  btn.classList.add('danger');
-  setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = 'Delete'; btn.classList.remove('danger'); } }, 3000);
+  btn.textContent = 'Sure?';
+  btn.classList.add('alert');
+  setTimeout(() => { if (btn.isConnected) { delete btn.dataset.armed; btn.textContent = 'Delete'; btn.classList.remove('alert'); } }, 3000);
 }
 
 function maxBarsFor(div) { return [8, 4, 2, 1].find((b) => b * 4 * div <= 128 && b <= ed.bars) || 1; }
@@ -165,7 +167,7 @@ function resample(t, div, bars) {
 
 function targetLabel(t) {
   const tg = t.target?.length ? t.target : ['all'];
-  return tg.includes('all') ? 'All lights' : tg.map((g) => g[0].toUpperCase() + g.slice(1)).join(' + ');
+  return tg.includes('all') ? 'All' : tg.map((g) => g[0].toUpperCase() + g.slice(1)).join('+');
 }
 
 // ------------------------------------------------------------------ one row per track
@@ -174,13 +176,13 @@ function trackRow(t, i) {
   const pal = S.show.palette.colors;
   const c0 = t.effect.type === 'rainbow' ? 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)' : colorOf((t.effect.colors || ['p0'])[0], pal);
   const row = h('div.trow', { class: [t.id === selTrack ? 'sel' : '', t.mute ? 'muted-t' : ''].join(' '), 'data-track': t.id },
-    h('button.tlabel', { onclick: () => { selTrack = t.id; renderEditor(); }, title: 'Edit this track' },
-      h('span.dotc', { style: { background: c0 } }),
-      h('b', t.name), h('small', `${targetLabel(t)} · ${DIV_LABEL[g.div]}`), h('span.wicon.warn', { hidden: true, title: 'Some lights can’t keep up' }, '')),
+    h('button.tlabel', { onclick: () => { selTrack = t.id; renderEditor(); } },
+      h('i.dotc', { style: { background: c0 } }),
+      h('b', t.name), h('small', `${targetLabel(t)} ${DIV_LABEL[g.div]}`), h('span.wicon', { hidden: true, title: 'Some lights can’t keep up' }, '!')),
     stepGrid(t),
     h('div.trow-tools',
-      h('button.btn.xs', { class: t.mute ? 'on' : '', title: 'Mute', onclick: () => { t.mute = !t.mute; commit(true); } }, 'M'),
-      h('button.btn.xs', { class: t.solo ? 'on' : '', title: 'Solo', onclick: () => { t.solo = !t.solo; commit(true); } }, 'S'),
+      h('button.xs', { class: t.mute ? 'on' : '', title: 'Mute', onclick: () => { t.mute = !t.mute; commit(true); } }, 'M'),
+      h('button.xs', { class: t.solo ? 'on' : '', title: 'Solo', onclick: () => { t.solo = !t.solo; commit(true); } }, 'S'),
       h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: t.level, title: 'Track level', 'aria-label': `${t.name} level`, style: { width: '70px' },
         oninput: (e) => { t.level = parseFloat(e.target.value); commit(); } })));
   return row;
@@ -204,27 +206,26 @@ function trackPanel(t, i) {
   return h('div.tpanel',
     h('div.ctl',
       field('Track', h('input.tname', { type: 'text', value: t.name, oninput: (e) => { t.name = e.target.value; commit(); } })),
-      h('span.chips', ['all', ...GROUPS].map((grp) =>
-        h('button.chip', { class: target.includes(grp) ? 'on' : '', onclick: () => setTarget(grp) }, grp === 'all' ? 'All' : grp[0].toUpperCase() + grp.slice(1)))),
+      field('Lights', h('span.seg', ['all', ...GROUPS].map((grp) =>
+        h('button', { class: target.includes(grp) ? 'on' : '', onclick: () => setTarget(grp) }, grp === 'all' ? 'All' : grp[0].toUpperCase() + grp.slice(1))))),
       field('Step', select(S.divs.map((d) => [d, DIV_LABEL[d]]), g.div, (v) => { const d = parseInt(v); resample(t, d, Math.min(g.bars, maxBarsFor(d))); commit(true); })),
       field('Length', select([1, 2, 4, 8].filter((b) => b <= maxBars).map((b) => [b, `${b} bar${b > 1 ? 's' : ''}`]), Math.min(g.bars, maxBars),
         (v) => { resample(t, g.div, parseInt(v)); commit(true); })),
-      field('Envelope', select(ENV, g.env, (v) => { g.env = v; commit(); renderWarnings(); })),
+      field('Shape', select(ENV, g.env, (v) => { g.env = v; commit(); renderWarnings(); })),
       field('On %', h('input', { type: 'number', min: 5, max: 100, step: 5, value: Math.round((g.duty ?? 0.5) * 100),
-        title: 'Gate on-time or decay length, as % of a step', onchange: (e) => { g.duty = clamp(e.target.value / 100, 0.05, 1); commit(); renderWarnings(); } })),
+        onchange: (e) => { g.duty = clamp(e.target.value / 100, 0.05, 1); commit(); renderWarnings(); } })),
       field('Spread', select(SPREAD, g.spread, (v) => { g.spread = v; commit(); })),
-      field('Slow lights', select(FALLBACK, g.fallback, (v) => { g.fallback = v; commit(); renderWarnings(); }, { title: 'What lights that can’t switch this fast should do' })),
+      field('Slow lights', select(FALLBACK, g.fallback, (v) => { g.fallback = v; commit(); renderWarnings(); })),
       g.div % 2 === 0 ? field('Swing %', h('input', { type: 'number', min: 0, max: 60, step: 5, value: Math.round((g.swing || 0) * 100),
         onchange: (e) => { g.swing = clamp(e.target.value / 100, 0, 0.6); commit(); } })) : null,
-      field('Mix', select(BLEND, t.blend || 'max', (v) => { t.blend = v; commit(); }, { title: 'How this track mixes with the ones above' })),
-      h('span.row', { style: { gap: '3px', alignSelf: 'end' } },
-        h('button.btn.xs', { title: 'Move up', disabled: i === 0, onclick: () => { ed.tracks.splice(i - 1, 0, ed.tracks.splice(i, 1)[0]); commit(true); } }, '↑'),
-        h('button.btn.xs', { title: 'Move down', disabled: i === ed.tracks.length - 1, onclick: () => { ed.tracks.splice(i + 1, 0, ed.tracks.splice(i, 1)[0]); commit(true); } }, '↓'),
-        h('button.btn.xs', { title: 'Duplicate track', onclick: () => { const c = { ...clone(t), id: uid('tr'), name: t.name + ' 2' }; ed.tracks.splice(i + 1, 0, c); selTrack = c.id; commit(true); } }, '⧉'),
-        h('button.btn.xs', { title: 'Delete track', onclick: () => { ed.tracks.splice(i, 1); selTrack = ed.tracks[Math.max(0, i - 1)]?.id; commit(true); } }, '✕'))),
+      field('Mix', select(BLEND, t.blend || 'max', (v) => { t.blend = v; commit(); })),
+      h('span.seg.end',
+        h('button', { title: 'Move up', disabled: i === 0, onclick: () => { ed.tracks.splice(i - 1, 0, ed.tracks.splice(i, 1)[0]); commit(true); } }, 'Up'),
+        h('button', { title: 'Move down', disabled: i === ed.tracks.length - 1, onclick: () => { ed.tracks.splice(i + 1, 0, ed.tracks.splice(i, 1)[0]); commit(true); } }, 'Down'),
+        h('button', { title: 'Duplicate track', onclick: () => { const c = { ...clone(t), id: uid('tr'), name: t.name + ' 2' }; ed.tracks.splice(i + 1, 0, c); selTrack = c.id; commit(true); } }, 'Copy'),
+        h('button', { title: 'Delete track', onclick: () => { ed.tracks.splice(i, 1); selTrack = ed.tracks[Math.max(0, i - 1)]?.id; commit(true); } }, 'Delete'))),
     effectRow(t),
     h('div.step-tools',
-      h('span.muted', { style: { fontSize: '11px', marginRight: '4px' } }, 'Steps:'),
       ...[['All', () => g.steps.fill(1)], ['None', () => g.steps.fill(0)],
         ['Beats', () => g.steps.forEach((_, k) => (g.steps[k] = k % g.div === 0 ? 1 : 0))],
         ['Offbeats', () => g.steps.forEach((_, k) => (g.steps[k] = g.div >= 2 && k % g.div === g.div / 2 ? 1 : 0))],
@@ -232,8 +233,7 @@ function trackPanel(t, i) {
         ['Invert', () => g.steps.forEach((v, k) => (g.steps[k] = v > 0 ? 0 : 1))],
         ['◀', () => g.steps.push(g.steps.shift())], ['▶', () => g.steps.unshift(g.steps.pop())],
         ['Random', () => g.steps.forEach((_, k) => (g.steps[k] = Math.random() < 0.35 ? (Math.random() < 0.3 ? 0.5 : 1) : 0))],
-      ].map(([label, fn]) => h('button.btn.xs', { onclick: fill(fn) }, label)),
-      h('span.muted', { style: { fontSize: '11px', marginLeft: '6px' } }, 'Click/drag the grid to paint · Shift or right-click = half')),
+      ].map(([label, fn]) => h('button.xs', { onclick: fill(fn) }, label))),
     h('div.warnings', { 'data-track': t.id }));
 }
 
@@ -303,8 +303,8 @@ function effectRow(t) {
     let ctl;
     if (P.kind === 'rate') ctl = select(RATE_OPTS, val, (v) => set(parseFloat(v)));
     else if (P.kind === 'axis') ctl = select(AXIS, val, set);
-    else if (P.kind === 'bool') ctl = h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked), style: { height: '28px' } });
-    else if (P.kind === 'unit') ctl = h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: val, style: { width: '84px', height: '28px' }, oninput: (e) => set(parseFloat(e.target.value)) });
+    else if (P.kind === 'bool') ctl = h('input', { type: 'checkbox', checked: !!val, onchange: (e) => set(e.target.checked) });
+    else if (P.kind === 'unit') ctl = h('input', { type: 'range', min: 0, max: 1, step: 0.01, value: val, style: { width: '84px' }, oninput: (e) => set(parseFloat(e.target.value)) });
     else ctl = h('input', { type: 'number', min: P.min, max: P.max, step: P.step, value: val, onchange: (e) => set(parseFloat(e.target.value)) });
     row.append(field(P.label, ctl));
   }
@@ -321,7 +321,7 @@ function colorChips(t) {
       onclick: (e) => colorMenu(e.currentTarget, c, (nc) => { if (nc == null) fx.colors.splice(i, 1); else fx.colors[i] = nc; commit(true); }, fx.colors.length > min) },
     /^p\d$/.test(c) ? c : ''));
   });
-  if (fx.colors.length < max) wrap.append(h('button.btn.xs', { onclick: () => { fx.colors.push(`p${fx.colors.length % 4}`); commit(true); } }, '+'));
+  if (fx.colors.length < max) wrap.append(h('button.xs', { onclick: () => { fx.colors.push(`p${fx.colors.length % 4}`); commit(true); } }, '+'));
   return wrap;
 }
 
@@ -334,11 +334,10 @@ function colorMenu(anchor, cur, done, canRemove) {
   const pick = (v) => { close(); done(v); };
   const custom = /^#/.test(cur) ? cur : colorOf(cur, pal);
   const menu = h('div.cmenu', { style: { left: `${Math.min(r.left, innerWidth - 240)}px`, top: `${Math.max(8, r.top - 118)}px` } },
-    h('div.muted', { style: { fontSize: '11px' } }, 'Palette slots follow the palette you pick in Perform'),
-    h('div.row', pal.slice(0, 4).map((c, i) => h('button.cchip', { style: { background: c }, onclick: () => pick(`p${i}`) }, `p${i}`)),
+    h('div.cmenu-row', pal.slice(0, 4).map((c, i) => h('button.cchip', { style: { background: c }, onclick: () => pick(`p${i}`) }, `p${i}`)),
       h('button.cchip', { style: { background: '#fff' }, onclick: () => pick('white') }, 'W')),
-    h('div.row', h('input', { type: 'color', value: custom, onchange: (e) => pick(e.target.value) }), h('span.muted', { style: { fontSize: '12px' } }, 'Fixed colour'),
-      canRemove ? h('button.btn.xs', { style: { marginLeft: 'auto' }, onclick: () => pick(null) }, 'Remove') : null));
+    h('div.cmenu-row', h('input', { type: 'color', value: custom, 'aria-label': 'Fixed colour', onchange: (e) => pick(e.target.value) }),
+      canRemove ? h('button.xs', { onclick: () => pick(null) }, 'Remove') : null));
   document.body.append(menu);
   setTimeout(() => document.addEventListener('pointerdown', outside, true));
 }
@@ -356,8 +355,8 @@ export function analyzeTrack(t) {
   const g = t.gate;
   const k = g.env === 'gate' ? Math.max(0.05, Math.min(g.duty, 1 - g.duty)) : ['decay', 'swell'].includes(g.env) ? 0.5 : 1;
   const tgt = t.target?.length ? t.target : ['all'];
-  const fxs = S.show.fixtures.filter((f) => tgt.includes('all') || tgt.includes(f.group) || tgt.includes(f.id));
-  if (!fxs.length) return [{ info: true, text: 'No lights in this target yet. Add some in the Rig tab.' }];
+  const fxs = S.show.fixtures.filter((f) => f.shape !== 'screen' && (tgt.includes('all') || tgt.includes(f.group) || tgt.includes(f.id)));
+  if (!fxs.length) return [{ info: true, text: 'No lights in this group.' }];
   const groups = new Map();
   for (const f of fxs) {
     const mp = Math.max(f.caps.min_pulse_ms, cap > 0 ? 500 / cap : 0);
@@ -370,7 +369,7 @@ export function analyzeTrack(t) {
   const what = { pulse: (c) => `pulse at ${fmtDiv(c)} instead`, hold: () => 'hold a steady glow instead', skip: () => 'stay dark for this track' };
   for (const [c, names] of groups) {
     const list = names.length > 3 ? `${names.slice(0, 3).join(', ')} +${names.length - 3}` : names.join(', ');
-    out.push({ text: `${list} can’t switch at ${fmtDiv(g.div)} (${Math.round(bpm)} BPM) → will ${what[g.fallback || 'pulse'](c)}` });
+    out.push({ text: `${list}: too fast at ${Math.round(bpm)} BPM, will ${what[g.fallback || 'pulse'](c)}` });
   }
   return out;
 }
