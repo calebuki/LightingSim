@@ -57,6 +57,7 @@ def finish_update(target: str, pid: str, relaunch_args: list[str]) -> None:
     dst = Path(target)
     log.info("Finishing update: %s -> %s (waiting for pid %s)", src, dst, pid)
     _wait_for_exit(int(pid), 60)
+    _stop_leftovers(dst / "LightingSim.exe")
     for attempt in range(30):  # antivirus / slow exits can hold files for a moment
         try:
             shutil.copytree(src, dst, dirs_exist_ok=True)
@@ -69,6 +70,23 @@ def finish_update(target: str, pid: str, relaunch_args: list[str]) -> None:
             time.sleep(1)
     log.info("Update installed; relaunching")
     subprocess.Popen([str(dst / "LightingSim.exe"), *relaunch_args], close_fds=True, cwd=str(dst))
+
+
+def _stop_leftovers(exe: Path) -> None:
+    """Close any other window still running from the install, which would keep its files locked.
+
+    By now the app's server has gone, so these have nothing left to show. Only copies running
+    from this exact path are touched.
+    """
+    if sys.platform != "win32":
+        return  # macOS and Linux can replace files that are in use
+    path = str(exe).replace("'", "''")
+    command = f"Get-Process -Name LightingSim -ErrorAction SilentlyContinue | Where-Object {{ $_.Path -eq '{path}' }} | Stop-Process -Force"
+    try:
+        subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+                       creationflags=subprocess.CREATE_NO_WINDOW, timeout=20, check=False)
+    except (OSError, subprocess.SubprocessError) as e:
+        log.warning("Couldn't check for other open windows: %s", e)
 
 
 def _wait_for_exit(pid: int, timeout: float):

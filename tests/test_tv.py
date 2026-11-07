@@ -182,3 +182,16 @@ def test_full_white_scene_turns_the_tv_white(tmp_path):
 def test_a_solo_tv_keeps_its_own_visual():
     tv = normalize_fixture({**make_fixture("tv", 0.5, 0.3), "own": {"id": "vortex"}})
     assert tv["own"] == {"id": "vortex"} and tv["wall"] == ""
+
+
+def test_a_second_launch_can_bring_the_open_app_forward(tmp_path):
+    async def go():
+        app = build_app(Show(tmp_path / "show.json"), 0, False)
+        async with TestClient(TestServer(app)) as client:
+            assert (await (await client.post("/api/focus")).json())["ok"] is False  # no window to show
+            called = []
+            app["core"].on_focus = lambda: called.append(True)
+            assert (await (await client.post("/api/focus")).json())["ok"] is True
+            assert called == [True]
+
+    asyncio.run(go())

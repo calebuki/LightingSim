@@ -64,6 +64,16 @@ def running_instance(port: int) -> bool:
         return False
 
 
+def focus_running(port: int) -> bool:
+    """Ask the copy that's already open to come to the front. False if it has no window to show."""
+    try:
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/api/focus", method="POST")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            return bool(json.loads(r.read()).get("ok"))
+    except Exception:
+        return False
+
+
 def port_free(host: str, port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
@@ -199,7 +209,11 @@ def run_desktop(show, port: int, lan: bool, data_dir: Path) -> bool:
     url = None
     server = None
     if running_instance(port):
-        # already running (e.g. double-clicked twice): open another window onto it
+        # already open (e.g. double-clicked twice): show that window. A second copy
+        # would hold the app's files open and stop updates from installing.
+        if focus_running(port):
+            return True
+        # running without a window of its own (browser or server mode): open one onto it
         url = f"http://127.0.0.1:{port}"
     else:
         host = "0.0.0.0" if lan else "127.0.0.1"
@@ -223,6 +237,18 @@ def run_desktop(show, port: int, lan: bool, data_dir: Path) -> bool:
     window.events.closed += api.close_tv  # the app quits with its main window
     if server:
         server.app["core"].on_quit = window.destroy  # the in-app Quit button closes the window
+        minimized = threading.Event()
+        window.events.minimized += minimized.set
+        window.events.restored += minimized.clear
+        window.events.maximized += minimized.clear
+
+        def bring_to_front():
+            if minimized.is_set():
+                window.restore()
+            window.on_top = True
+            window.on_top = False
+
+        server.app["core"].on_focus = bring_to_front
 
     webview.settings["ALLOW_DOWNLOADS"] = True
     import sys

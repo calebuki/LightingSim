@@ -58,6 +58,7 @@ class App:
         self.last_learn: dict | None = None
         self.held_controls: dict[str, float] = {}
         self.on_quit = None  # set by the desktop window
+        self.on_focus = None  # set by the desktop window
         self.updater = Updater()
 
     # ------------------------------------------------------------------ lifecycle
@@ -174,6 +175,13 @@ class App:
             asyncio.get_running_loop().call_later(delay, self.on_quit)
         else:
             asyncio.get_running_loop().call_later(delay, _graceful_exit)
+
+    async def focus(self, request):
+        """Another launch asks us to come to the front instead of opening a second copy."""
+        if not self.on_focus:
+            return web.json_response({"ok": False})
+        await asyncio.get_running_loop().run_in_executor(None, self.on_focus)
+        return web.json_response({"ok": True})
 
     async def quit(self, request):
         self.request_quit()
@@ -491,6 +499,7 @@ def build_app(show: Show, port: int, lan: bool) -> web.Application:
     app.router.add_get("/ws", core.ws_handler)
     app.router.add_get("/api/export", core.export_show)
     app.router.add_post("/api/quit", core.quit)
+    app.router.add_post("/api/focus", core.focus)
     app.router.add_get("/api/ping", core.ping)
     app.router.add_static("/static/", web_root(), show_index=False)
     app["core"] = core
