@@ -6,7 +6,8 @@
 //   uB     raw beat position, for things that land on the grid
 //   uKick  1 on the hit, decaying
 //   uE     energy, 0 moody to 1 harsh
-//   stepOf(d) / phaseOf(d)  a counter at d steps per beat, capped by the flash limit
+//   stepOf(d) / phaseOf(d)  a counter at d steps per beat, snapped down to 1, 2, 4, 8...
+//                           so it stays on the beat, and capped by the flash limit
 //   uZoom  how far a group of TVs has zoomed in; the visible height is 2/uZoom
 //   prev(uv)  last frame's (intensity, colour), for feedback; uPrev has mip levels
 
@@ -504,7 +505,7 @@ vec2 field(vec2 uv, vec2 p){
 }` },
   { id: 'cutup', name: 'Cutup', mood: 'harsh', glsl: `
 vec2 field(vec2 uv, vec2 p){
-  float s=stepOf(mix(1.,2.,uE));
+  float s=stepOf(uE>.6?2.:1.);
   vec2 off=vec2(hash(s),hash(s+1.))*40.;
   vec2 q=rot(hash(s+3.)*TAU)*p*(.6+hash(s+2.)*2.4)+off;
   float f=fbm(q+1.1*fbm(q+uT*.1));

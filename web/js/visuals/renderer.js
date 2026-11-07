@@ -33,8 +33,10 @@ vec2 curl(vec2 p,float t){const float e=.03;
   float c=noise3(vec3(p+vec2(e,0),t))+.5*noise3(vec3(p*2.+vec2(e,0),t)),d=noise3(vec3(p-vec2(e,0),t))+.5*noise3(vec3(p*2.-vec2(e,0),t));
   return vec2(a-b,d-c)/(2.*e);}
 vec2 prev(vec2 uv){vec4 s=textureLod(uPrev,uv,0.);return vec2(s.r,s.g/max(s.r,1e-4));}
-float stepOf(float d){return floor(uB*min(d,uMaxDiv));}
-float phaseOf(float d){return fract(uB*min(d,uMaxDiv));}
+// whole notes of the beat only: a rate like 1.5 a beat would drift off the grid
+float gridOf(float d){return pow(2.,floor(log2(min(d,uMaxDiv))+.001));}
+float stepOf(float d){return floor(uB*gridOf(d));}
+float phaseOf(float d){return fract(uB*gridOf(d));}
 `;
 const FIELD_MAIN = `
 uniform float uScale;
