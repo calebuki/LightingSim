@@ -1,7 +1,7 @@
 // Play tab: scene pads and the live controls next to them.
 import { S, send, beatNow, scene } from './state.js';
 import { $, $$, h, on, select, showTab } from './util.js';
-import { resolveVisual, visualDef } from './visuals/library.js';
+import { resolveVisual, visualName as nameOfVisual } from './visuals/library.js';
 import { heldOn, openTV, toggleHold } from './tvpanel.js';
 
 const TR_LABEL = { cut: 'Cut', fade: 'Fade', wipe: 'Wipe', iris: 'Iris', flash: 'Flash', dip: 'Dip' };
@@ -32,8 +32,7 @@ function render() {
 }
 
 export function visualName(sc) {
-  const v = resolveVisual(sc?.visual);
-  return v.id === 'none' ? 'Black' : visualDef(v.id)?.name || '';
+  return nameOfVisual(resolveVisual(sc?.visual).id);
 }
 
 function renderPads() {

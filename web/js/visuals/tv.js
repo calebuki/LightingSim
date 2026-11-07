@@ -89,12 +89,14 @@ export class TV {
     const beat = beatNow() + (latencyMs / 60000) * bpm;
     const inBeat = beat - Math.floor(beat);
     const limit = st.max_flash_hz || 0;
+    const maxDiv = limit > 0 ? Math.max(0.25, (limit * 60) / bpm) : 64;
     this.frame = {
       stamp: ++this.stamp,
       beat,
       time: now / 1000,
       kick: Math.max((1 - inBeat) ** 4, this._lights(dt)),
-      maxDiv: limit > 0 ? Math.max(0.25, (limit * 60) / bpm) : 64,
+      maxDiv,
+      maxStrobe: Math.min(maxDiv, (20 * 60) / bpm), // a 60 Hz picture can't flash cleanly past 20 a second
       energy: st.tv?.energy ?? 0.5,
       phase: this._phase(beat, st.tv?.energy ?? 0.5),
     };
@@ -113,7 +115,7 @@ export class TV {
   /** Render the live program into the bottom-left w x h of the GL canvas: a wall, or a part of one. */
   draw(w, h, wall, region) {
     const beat = this.frame.beat;
-    const p = this.program(beat);
+    const p = wall?.visual ? { vis: resolveVisual(wall.visual) } : this.program(beat);
     this.current = p.vis;
     // a shader that hasn't finished compiling keeps the old picture rather than flashing black
     if (!this.r.isReady(p.vis.id)) return false;

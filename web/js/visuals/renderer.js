@@ -2,7 +2,7 @@
 //   pass 1  the visual's field() renders to a texture with one texel per braille dot
 //   pass 2  particle sims (if any) draw additively into that texture
 //   pass 3  the glyph shader quantizes it into cells: braille, ASCII, lines, dots, grain or blocks
-import { VISUALS, visualDef } from './library.js';
+import { VISUALS, isSolid, visualDef } from './library.js';
 
 const VS = `#version 300 es
 in vec2 a;out vec2 vUV;void main(){vUV=a*.5+.5;gl_Position=vec4(a,0.,1.);}`;
@@ -56,7 +56,7 @@ vec2 P;
 uniform sampler2D uF,uF2,uRamp,uAtlas;
 uniform vec2 uView,uCells,uDots;
 uniform int uStyle,uMixType;
-uniform float uMix,uRow,uRow2,uGlow,uGain,uFlash;
+uniform float uMix,uRow,uRow2,uGlow,uGain,uFlash,uWhite,uWhite2;
 uniform vec3 uFlashC;
 const float N=${ASCII_RAMP.length}.;
 float sat(float x){return clamp(x,0.,1.);}
@@ -144,6 +144,14 @@ void main(){
   if(uStyle==0)c=braille();else if(uStyle==1)c=ascii();else if(uStyle==2)c=lines();
   else if(uStyle==3)c=dots();else if(uStyle==4)c=grain();else c=blocks();
   if(uGlow>0.){vec3 g=samp(P,3.5);c+=ramp(g.y,g.z)*sat(g.x)*uGlow*.42;}
+  // White and Strobe: the same transitions, applied to a plain white screen
+  float tm=uMix;
+  if(uMixType==2)tm=sat((uMix*1.25-P.x)/.25);
+  if(uMixType==3)tm=sat((uMix*1.25-length(P-.5)/.72)/.25);
+  if(uMixType>=4)tm=step(.5,uMix);
+  float w=uMixType==0?uWhite:mix(uWhite2,uWhite,tm);
+  if(uMixType==5)w*=abs(2.*uMix-1.);
+  c=mix(c,vec3(1.),w);
   c*=uGain;
   c=mix(c,uFlashC,uFlash);
   O=vec4(c,1.);
@@ -157,6 +165,17 @@ const FIXED_RAMPS = {
   thermal: ['#2a3fd0', '#19c3d6', '#f4d35e', '#f2542d', '#e0127b'],
   ice: ['#1d3f9e', '#3f86ea', '#a6d4ff', '#ffffff'],
 };
+
+/** How white a plain visual is right now. Strobe stays on the beat grid, slowing by halves when it has to. */
+function whiteLevel(vis, frame) {
+  if (vis?.id === 'white') return 1;
+  if (vis?.id !== 'strobe') return 0;
+  let d = vis.rate || 4;
+  const cap = frame.maxStrobe ?? frame.maxDiv;
+  while (d > cap && d > 0.25) d /= 2;
+  const x = frame.beat * d;
+  return x - Math.floor(x) < 0.5 ? 1 : 0;
+}
 
 /** Each visual starts somewhere different, the same place on every screen. */
 function seedOf(id) {
@@ -267,7 +286,7 @@ export class Renderer {
   }
 
   isReady(id) {
-    if (id === 'none') return true;
+    if (isSolid(id)) return true;
     const e = this._program(id);
     return !!e && e.ready;
   }
@@ -458,9 +477,9 @@ export class Renderer {
     const rows = Math.max(4, Math.round(cols / aspect / 2));
     const dotsW = cols * 2, dotsH = rows * 4;
 
-    const live = vis.id === 'none' ? null : this._advance(vis.id, vis, frame, slot, dotsW, dotsH, aspect, colsScale);
-    if (vis.id !== 'none' && !live) return false;
-    const old = from && from.id !== 'none' ? this._advance(from.id, from, frame, slot, dotsW, dotsH, aspect, colsScale) : null;
+    const live = isSolid(vis.id) ? null : this._advance(vis.id, vis, frame, slot, dotsW, dotsH, aspect, colsScale);
+    if (!isSolid(vis.id) && !live) return false;
+    const old = from && !isSolid(from.id) ? this._advance(from.id, from, frame, slot, dotsW, dotsH, aspect, colsScale) : null;
 
     const g = this.glyph;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -481,6 +500,8 @@ export class Renderer {
     gl.uniform1f(u.uGlow, vis.glow);
     gl.uniform1f(u.uGain, gain);
     gl.uniform1f(u.uFlash, flash);
+    gl.uniform1f(u.uWhite, whiteLevel(vis, frame));
+    gl.uniform1f(u.uWhite2, whiteLevel(from, frame));
     const fc = hexRgb(flashColor);
     gl.uniform3f(u.uFlashC, fc[0] / 255, fc[1] / 255, fc[2] / 255);
     const bind = (unit, tex, loc) => { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); gl.uniform1i(loc, unit); };

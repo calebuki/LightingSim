@@ -1,6 +1,6 @@
 // TV groups. TVs in the same group are one display: the picture covers the box around all of them,
 // and each TV shows the part of it where it physically sits, gaps included.
-// TVs in no group each show the whole picture.
+// TVs in no group each show the whole picture: the scene's, or their own if they have one.
 
 export const TV_WIDTH = 0.22; // of the stage's width, at size 1
 export const GROUPS = ['A', 'B', 'C'];
@@ -18,7 +18,8 @@ export function tvBox(f, stageAspect) {
  */
 export function wallsOf(fixtures, stageAspect) {
   const screens = fixtures.filter((f) => f.shape === 'screen');
-  const solo = screens.filter((f) => !f.wall);
+  const solo = screens.filter((f) => !f.wall && !f.own);
+  const own = screens.filter((f) => !f.wall && f.own);
   const walls = [];
   for (const id of new Set(screens.filter((f) => f.wall).map((f) => f.wall))) {
     const members = screens.filter((f) => f.wall === id);
@@ -37,8 +38,11 @@ export function wallsOf(fixtures, stageAspect) {
     });
   }
   walls.sort((a, b) => b.tvs.length - a.tvs.length);
-  if (solo.length || !walls.length) {
+  if (solo.length || (!walls.length && !own.length)) {
     walls.push({ id: '', aspect: 16 / 9, unitsWide: 1, tvs: solo.map((f) => ({ f, region: [0, 0, 1, 1] })) });
+  }
+  for (const f of own) {
+    walls.push({ id: `tv:${f.id}`, aspect: 16 / 9, unitsWide: 1, visual: f.own, tvs: [{ f, region: [0, 0, 1, 1] }] });
   }
   return walls;
 }

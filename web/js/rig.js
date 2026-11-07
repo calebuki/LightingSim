@@ -3,6 +3,7 @@ import { S, send, request, fixture } from './state.js';
 import { $, DIV_LABEL, emit, field, h, on, select, toast } from './util.js';
 import { openTV } from './tvpanel.js';
 import { GROUPS, TV_WIDTH } from './visuals/walls.js';
+import { SOLIDS, VISUALS } from './visuals/library.js';
 
 const PROTOCOLS = [['none', 'Simulate'], ['wled', 'WLED'], ['govee', 'Govee LAN'], ['wiz', 'WiZ'], ['dmx', 'DMX']];
 const CAPS = [
@@ -203,8 +204,11 @@ function screenControls(f) {
   };
   return [
     h('div.row', h('span.lbl', 'Group'),
-      h('div.seg', [['', 'None'], ...GROUPS.map((g) => [g, g])].map(([g, label]) =>
+      h('div.seg', [['', 'Solo'], ...GROUPS.map((g) => [g, g])].map(([g, label]) =>
         h('button', { class: (f.wall || '') === g ? 'on' : '', onclick: () => setGroup(g) }, label)))),
+    f.wall ? null : h('div.row', h('span.lbl', 'Plays'),
+      h('div.row-c', select([['scene', 'Scene'], ...SOLIDS, ...VISUALS.map((v) => [v.id, v.name])], f.own?.id || 'scene',
+        (v) => { f.own = v === 'scene' ? null : { id: v }; update(f, true); }, { id: 'fx-plays', 'aria-label': 'What this TV plays' }))),
     h('div.grid2',
       field('Name', h('input#fx-name', { type: 'text', value: f.name, oninput: (e) => { f.name = e.target.value; update(f); } })),
       field('Size', h('input#fx-size', { type: 'range', min: 0.4, max: 4, step: 0.05, value: f.size || 1, oninput: (e) => { f.size = parseFloat(e.target.value); update(f); } })),

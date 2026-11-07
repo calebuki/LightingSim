@@ -14,6 +14,10 @@ export const STYLES = [['braille', 'Braille'], ['ascii', 'ASCII'], ['lines', 'Li
 export const COLORS = [['palette', 'Palette'], ['mono', 'White'], ['thermal', 'Thermal'], ['ice', 'Ice']];
 export const DETAIL = [[80, 'Coarse'], [120, 'Medium'], [160, 'Fine'], [220, 'Finest']];
 export const MOODS = [['moody', 'Moody'], ['dynamic', 'Dynamic'], ['harsh', 'Harsh']];
+// Plain full-screen pictures, with no glyphs and nothing to compile.
+export const SOLIDS = [['none', 'Black'], ['white', 'White'], ['strobe', 'Strobe']];
+export const STROBE_RATES = [[1, '1 beat'], [2, '1/2'], [4, '1/4'], [8, '1/8'], [16, '1/16']];
+export const isSolid = (id) => SOLIDS.some(([k]) => k === id);
 export const BASE = { id: 'currents', style: 'braille', color: 'palette', cols: 160, speed: 1, energy: 0.5, scale: 1, glow: 0.5 };
 
 // ------------------------------------------------------------------ flow sim (runs on the CPU)
@@ -537,11 +541,12 @@ vec2 field(vec2 uv, vec2 p){
 
 const byId = new Map(VISUALS.map((v) => [v.id, v]));
 export const visualDef = (id) => byId.get(id) || null;
+export const visualName = (id) => SOLIDS.find(([k]) => k === id)?.[1] || byId.get(id)?.name || '';
 
 /** A scene's stored visual with library and base defaults filled in. */
 export function resolveVisual(v) {
   const id = v?.id ?? BASE.id;
-  if (id === 'none') return { ...BASE, ...v, id: 'none' };
+  if (isSolid(id)) return { ...BASE, rate: 4, ...v, id };
   const def = byId.get(id) || byId.get(BASE.id);
   return { ...BASE, ...def.defaults, ...v, id: def.id };
 }

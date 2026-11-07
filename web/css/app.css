@@ -204,8 +204,9 @@ label.field-inline select { color: var(--fg); }
 #tv-controls .seg button { flex: 1; padding: 0 4px; min-width: 0; }
 #tv-library { grid-area: lib; display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; border-left: 1px solid var(--line); }
 #tv-library > .tabs { padding: 7px 12px; height: 40px; border-bottom: 1px solid var(--line); }
-#tv-library .tile-black { border: 1px solid var(--line); padding: 0 9px; color: var(--fg); }
-#tv-library .tile-black.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+#tv-library .tile-solid { border: 1px solid var(--line); padding: 0 9px; color: var(--fg); }
+#tv-library .tile-solid:hover { border-color: var(--line2); }
+#tv-library .tile-solid.on { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); grid-template-rows: repeat(5, minmax(0, 1fr)); gap: 1px; min-height: 0; padding: 1px; }
 .tile { position: relative; display: block; height: auto; padding: 0; border: 0; background: #000; overflow: hidden; min-height: 0; }
 .tile canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }

@@ -1,7 +1,7 @@
 // The TV picture in the controller, the visual library, and opening the real TV window.
 import { S, send, scene } from './state.js';
 import { $, $$, debounce, emit, h, on, select } from './util.js';
-import { BASE, COLORS, DETAIL, MOODS, STYLES, VISUALS, resolveVisual } from './visuals/library.js';
+import { BASE, COLORS, DETAIL, MOODS, SOLIDS, STROBE_RATES, STYLES, VISUALS, isSolid, resolveVisual } from './visuals/library.js';
 import { TV } from './visuals/tv.js';
 import { motionRate } from './visuals/renderer.js';
 import { wallsOf } from './visuals/walls.js';
@@ -86,7 +86,7 @@ function paintPanel(wall) {
 /** Opens every picture on real screens. Pressing again closes them. */
 export async function openTV() {
   const list = wallsOf(S.show.fixtures, S.show.settings.stage.aspect || 16 / 9).map((w) => ({
-    query: w.id ? `wall=${w.id}` : '', tvs: w.id ? w.tvs.length : 1, aspect: w.aspect,
+    query: w.visual ? `id=${w.tvs[0].f.id}` : w.id ? `wall=${w.id}` : '', tvs: w.id ? w.tvs.length : 1, aspect: w.aspect,
   }));
   if (window.pywebview?.api?.open_tv) return window.pywebview.api.open_tv(list);
   list.forEach((s, i) => window.open(`/tv${s.query ? `?${s.query}` : ''}`, `lightsim-tv-${i}`, `popup,width=1280,height=${Math.round(1280 / s.aspect)}`));
@@ -148,7 +148,7 @@ function renderLibrary() {
     h('div.tabs',
       [['all', 'All'], ...MOODS].map(([k, label]) => h('button', { class: filter === k ? 'on' : '', onclick: () => { filter = k; renderLibrary(); sizeTiles(); markTiles(); } }, label)),
       h('span.grow'),
-      h('button', { 'data-id': 'none', class: 'tile-black', onclick: () => patchVisual({ id: 'none' }) }, 'Black')),
+      h('div.seg', SOLIDS.map(([id, label]) => h('button.tile-solid', { 'data-id': id, onclick: () => patchVisual({ id }) }, label)))),
     h('div.tiles', tiles.map((t) => t.el)));
   sizeTiles();
   markTiles();
@@ -173,7 +173,7 @@ function sizeTiles() {
 function markTiles() {
   const cur = resolveVisual(editing());
   $$('.tile', library).forEach((el) => el.classList.toggle('on', el.dataset.id === cur.id));
-  $('.tile-black', library)?.classList.toggle('on', cur.id === 'none');
+  $$('.tile-solid', library).forEach((el) => el.classList.toggle('on', el.dataset.id === cur.id));
 }
 
 let tileIndex = 0;
@@ -239,13 +239,16 @@ function renderControls() {
         select(scenes, liveScene(), (id) => send('launch', { scene: id, quantize: 'now' }), { 'aria-label': 'Scene', disabled: heldOn() }),
         h('button.toggle', { class: set.hold ? 'on' : '', title: 'Keep this visual when scenes change (H)', onclick: toggleHold }, 'Hold'),
         h('button', { title: 'Open the TV picture in its own window', onclick: openTV }, 'Open'))),
-    h('div.row', h('span.lbl', 'Style'), seg(STYLES, v.style, (x) => patchVisual({ style: x }))),
-    h('div.row', h('span.lbl', 'Colour'), seg(COLORS, v.color, (x) => patchVisual({ color: x }))),
-    h('div.row', h('span.lbl', 'Detail'), seg(DETAIL, v.cols, (x) => patchVisual({ cols: x }))),
-    slider('Speed', 'speed', v.speed, 0.1, 3),
-    slider('Energy', 'energy', v.energy, 0, 1),
-    slider('Scale', 'scale', v.scale, 0.4, 2.5),
-    slider('Glow', 'glow', v.glow, 0, 1.5),
+    ...(v.id === 'strobe' ? [h('div.row', h('span.lbl', 'Rate'), seg(STROBE_RATES, v.rate, (x) => patchVisual({ rate: x })))] : []),
+    ...(isSolid(v.id) ? [] : [
+      h('div.row', h('span.lbl', 'Style'), seg(STYLES, v.style, (x) => patchVisual({ style: x }))),
+      h('div.row', h('span.lbl', 'Colour'), seg(COLORS, v.color, (x) => patchVisual({ color: x }))),
+      h('div.row', h('span.lbl', 'Detail'), seg(DETAIL, v.cols, (x) => patchVisual({ cols: x }))),
+      slider('Speed', 'speed', v.speed, 0.1, 3),
+      slider('Energy', 'energy', v.energy, 0, 1),
+      slider('Scale', 'scale', v.scale, 0.4, 2.5),
+      slider('Glow', 'glow', v.glow, 0, 1.5),
+    ]),
     lan ? h('div.row', h('span.lbl', 'Address'), h('code', lan)) : null,
   ].filter(Boolean));
 }

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from .fixtures import make_fixture, new_id
 
-SHOW_VERSION = 2
+SHOW_VERSION = 3
 
 PALETTES = [
     {"name": "Dusk", "colors": ["#3f4f9f", "#8f62b8", "#e58bb8", "#ffe1ea"]},
@@ -60,7 +60,7 @@ SCENE_VISUALS = {
     "Triplet Chase": {"id": "moire"},
     "32nd Roll": {"id": "static"},
     "Palette Cycle": {"id": "bloom"},
-    "Full White": {"id": "none"},
+    "Full White": {"id": "white"},
     "Dark": {"id": "none"},
 }
 

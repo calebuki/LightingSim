@@ -77,6 +77,8 @@ Open the **TV** tab to browse the library. Every tile is live. Click one to give
 - **Dynamic:** Currents, Ink, Bloom, Ridges, Swell, Tunnel, Moiré, Melt, Skin, Liquid, Vortex, Orbit
 - **Harsh:** Shards, Tear, Bars, Shock, Static, Blocks, Cutup, Radar, Warp
 
+Next to the library are three plain screens: **Black**, **White** and **Strobe**, an all-white flash on the beat. Pick its **Rate** from a flash per beat down to 1/16. A 60 Hz picture can't flash cleanly past about 20 times a second, so at club tempos 1/16 plays as 1/8, and the Flash limit in Setup slows it further.
+
 Each visual has a **style** (Braille, ASCII, Lines, Dots, Grain, Blocks), **colour** (Palette follows the lights), **detail**, **speed**, **energy**, **scale** and **glow**.
 
 While performing, the **Energy** slider on the Play tab pushes every visual from moody toward harsh. **Hold** keeps the current visual when scenes change. **Flash**, **Strobe**, **Black**, **Master** and the **TV** fader all reach the screen too.
@@ -88,7 +90,7 @@ Press **Open** on the Play or TV tab.
 - **HDMI:** with the TV connected as a second display, the picture opens fullscreen on it.
 - **Smart TV or casting:** tick **Allow phones and TVs on Wi-Fi** in Setup and restart. The TV tab shows an address ending in `/tv`. Open it in the TV's browser, or cast that browser tab.
 
-**Several TVs as one display:** in the Rig tab, select a TV and press **Add TV**. The new TV joins it side by side and the picture extends across both. Put existing TVs in the same **Group** (A, B or C) and press **Line up** to do the same by hand. The picture covers the box around the group, and each TV shows the part where it sits on stage, so gaps between TVs behave like gaps in a real video wall.
+**Several TVs as one display:** in the Rig tab, select a TV and press **Add TV**. The new TV joins it side by side and the picture extends across both. Put existing TVs in the same **Group** (A, B or C) and press **Line up** to do the same by hand. Set a TV to **Solo** to take it out of its group; **Plays** then lets it follow the scene or run its own visual. The picture covers the box around the group, and each TV shows the part where it sits on stage, so gaps between TVs behave like gaps in a real video wall.
 
 With a group on one computer, **Open** stretches a single window across that many spare displays. A TV with its own browser can show just its part at the address in its Rig panel, ending in `/tv?id=…`. Those separate pages stay on the same beat, but Currents, Ink, Melt, Skin, Orbit and Radar build up frame by frame on each screen, so they won't line up exactly at the seams; use the stretched window for those.
 

@@ -11,7 +11,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from lightsim.app import build_app
 from lightsim.engine import CompiledTrack, Engine, Layout
 from lightsim.fixtures import make_fixture, normalize_fixture
-from lightsim.presets import SCENE_VISUALS, default_scenes, default_show, pat, track
+from lightsim.presets import SCENE_VISUALS, SHOW_VERSION, default_scenes, default_show, pat, track
 from lightsim.show import Show
 
 LIBRARY = Path(__file__).resolve().parent.parent / "web" / "js" / "visuals" / "library.js"
@@ -102,7 +102,7 @@ def test_old_show_files_gain_a_tv_once(tmp_path):
     assert all("visual" in s for s in show.data["scenes"])
     assert show.data["settings"]["theme"] == "light"
     assert show.data["palette"]["name"] == "Dusk"
-    assert show.data["version"] == 2
+    assert show.data["version"] == SHOW_VERSION
 
     show.save()
     again = Show(path)
@@ -118,7 +118,7 @@ def test_a_removed_tv_stays_removed(tmp_path):
 
 
 def test_preset_visuals_exist_in_the_library():
-    ids = library_ids() | {"none"}
+    ids = library_ids() | {"none", "white", "strobe"}
     assert len(library_ids()) >= 30
     assert {v["id"] for v in SCENE_VISUALS.values()} <= ids
     assert all(s["visual"]["id"] in ids for s in default_scenes())
@@ -158,3 +158,27 @@ def test_energy_fader_moves_a_shared_phase(tmp_path):
     eng.clock.b = 11.0
     eng.tick(time.perf_counter())
     assert abs(eng.status()["tv_phase"] - 0.25) < 1e-6
+
+
+def test_full_white_scene_turns_the_tv_white(tmp_path):
+    assert next(s for s in default_scenes() if s["name"] == "Full White")["visual"]["id"] == "white"
+    old = default_show()
+    old["version"] = 2
+    for s in old["scenes"]:
+        if s["name"] == "Full White":
+            s["visual"] = {"id": "none"}
+        if s["name"] == "Dark":
+            s["visual"] = {"id": "none"}
+    mine = dict(old["scenes"][0], id="sc_mine", name="Full White", builtin=False, visual={"id": "none"})
+    old["scenes"].append(mine)
+    path = tmp_path / "show.json"
+    path.write_text(json.dumps(old), "utf-8")
+    scenes = Show(path).data["scenes"]
+    assert next(s for s in scenes if s["name"] == "Full White" and s.get("builtin"))["visual"]["id"] == "white"
+    assert next(s for s in scenes if s["name"] == "Dark")["visual"]["id"] == "none"
+    assert next(s for s in scenes if s["id"] == "sc_mine")["visual"]["id"] == "none"  # your own scene stays yours
+
+
+def test_a_solo_tv_keeps_its_own_visual():
+    tv = normalize_fixture({**make_fixture("tv", 0.5, 0.3), "own": {"id": "vortex"}})
+    assert tv["own"] == {"id": "vortex"} and tv["wall"] == ""

@@ -64,8 +64,17 @@ class Show:
             s["id"] for s in out["scenes"] if s["id"] not in out.get("bank", [])]
         if d.get("version", 1) < 2:
             Show._migrate_v2(out)
+        if d.get("version", 1) < 3:
+            Show._migrate_v3(out)
         out["version"] = SHOW_VERSION
         return out
+
+    @staticmethod
+    def _migrate_v3(d: dict):
+        """Version 3 adds a white TV, which the built-in Full White scene should use."""
+        for s in d["scenes"]:
+            if s.get("name") == "Full White" and s.get("builtin") and (s.get("visual") or {}).get("id") == "none":
+                s["visual"] = {"id": "white"}
 
     @staticmethod
     def _migrate_v2(d: dict):

@@ -2,7 +2,7 @@
 // and warnings when a light can't physically keep up with the subdivision.
 import { S, send, beatNow, scene } from './state.js';
 import { $, DIV_LABEL, RATE_OPTS, clamp, clone, colorOf, debounce, field, h, on, select, uid } from './util.js';
-import { VISUALS, resolveVisual } from './visuals/library.js';
+import { SOLIDS, VISUALS, resolveVisual } from './visuals/library.js';
 
 const GROUPS = ['floods', 'strips', 'strings', 'bulbs'];
 const ENV = [['hold', 'Hold'], ['gate', 'Gate'], ['decay', 'Decay'], ['swell', 'Swell'], ['smooth', 'Glide'], ['sine', 'Pulse']];
@@ -119,7 +119,7 @@ function renderHead() {
       commit(true);
     }, { id: 'sc-bars', 'aria-label': 'Loop length' }),
     h('label.field-inline', 'TV',
-      select([['none', 'Black'], ...VISUALS.map((v) => [v.id, v.name])], vis.id, (v) => { ed.visual = { ...ed.visual, id: v }; commit(); }, { id: 'sc-visual', 'aria-label': 'TV visual' })),
+      select([...SOLIDS, ...VISUALS.map((v) => [v.id, v.name])], vis.id, (v) => { ed.visual = { ...ed.visual, id: v }; commit(); }, { id: 'sc-visual', 'aria-label': 'TV visual' })),
     h('label.check', { title: 'Autopilot skips this scene' },
       h('input#sc-utility', { type: 'checkbox', checked: !!ed.utility, onchange: (e) => { ed.utility = e.target.checked; commit(); } }), 'Skip in auto'),
     h('span.grow'),
